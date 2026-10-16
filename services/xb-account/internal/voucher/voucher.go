@@ -11,6 +11,7 @@ package voucher
 import (
 	"context"
 	"errors"
+	"log"
 	"time"
 
 	pb "openpak/xb-live/services/xb-account/internal/corepb"
@@ -147,6 +148,7 @@ func (s *Service) Check(ctx context.Context, machineID, typed string) error {
 	d, err := s.Store.GetDevice(ctx, machineID)
 	if err != nil || d.Status != xbaccountapi.StatusActive || d.Signup != store.SignupAwaitingGamertag {
 		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			log.Printf("voucher check: device lookup error: %v", err)
 			return ErrUnavailable
 		}
 		s.Fail(machineID)
@@ -162,6 +164,7 @@ func (s *Service) Check(ctx context.Context, machineID, typed string) error {
 		s.Fail(machineID)
 		return ErrBad
 	default:
+		log.Printf("voucher check: store error: %v", err)
 		return ErrUnavailable
 	}
 }

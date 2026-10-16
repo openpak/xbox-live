@@ -79,8 +79,18 @@ func TestVerifyVoucher(t *testing.T) {
 			t.Fatalf("%v: %q", c.err, r)
 		}
 	}
-	// malformed: length lies, empty
-	if r := do(t, newSignupServer(t, nil, &fakeS{}), infoA, "POST", "/xuacs/verifyvoucher.ashx", "xon/5", append(vbody(code), 'x')); !strings.HasPrefix(r, "HTTP/1.0 400") {
+	// the real client pads the body to 0x4e (78) bytes: country 66, length 25
+	padded := append(vbody(code), make([]byte, 0x4e-3-len(code))...)
+	padded[0] = 66
+	if r := do(t, newSignupServer(t, nil, &fakeS{}), infoA, "POST", "/xuacs/verifyvoucher.ashx", "xon/5", padded); !strings.Contains(r, "X-Err: 0\r\n") || len(padded) != 78 {
+		t.Fatal(r)
+	}
+	// malformed: length longer than the body, oversize
+	short := vbody(code)[:20]
+	if r := do(t, newSignupServer(t, nil, &fakeS{}), infoA, "POST", "/xuacs/verifyvoucher.ashx", "xon/5", short); !strings.HasPrefix(r, "HTTP/1.0 400") {
+		t.Fatal(r)
+	}
+	if r := do(t, newSignupServer(t, nil, &fakeS{}), infoA, "POST", "/xuacs/verifyvoucher.ashx", "xon/5", append(padded, 0)); !strings.HasPrefix(r, "HTTP/1.0 400") {
 		t.Fatal(r)
 	}
 }

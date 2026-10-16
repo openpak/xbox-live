@@ -38,17 +38,18 @@ type Signups interface {
 }
 
 // parseVoucher decodes the verifyvoucher / verifyvouchergetoffer body: country
-// byte, u16 LE length, code (UTF-8). The length must account for every byte and
-// the whole body is at most 0x4e bytes (the client's request buffer).
+// byte, u16 LE length, code (UTF-8), then padding. The real client always sends
+// the full 0x4e-byte buffer (observed: 78 bytes for a 25-character code), so
+// bytes after the code are ignored; the body is at most 0x4e bytes.
 func parseVoucher(b []byte) (country byte, code string, ok bool) {
 	if len(b) < 3 || len(b) > 0x4e {
 		return 0, "", false
 	}
 	n := int(binary.LittleEndian.Uint16(b[1:3]))
-	if len(b) != 3+n || n == 0 {
+	if len(b) < 3+n || n == 0 {
 		return 0, "", false
 	}
-	return b[0], string(b[3:]), true
+	return b[0], string(b[3 : 3+n]), true
 }
 
 func voucherStatus(err error) response {

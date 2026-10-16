@@ -241,7 +241,23 @@ func (s *Server) handle(ctx context.Context, info xbfeature.Info, req *http.Requ
 	if !s.allow(info.PrincipalID) {
 		return status(429)
 	}
-	return handler(ctx, info, body)
+	resp := handler(ctx, info, body)
+	if resp.code == 400 {
+		// Shape only, never content: helps match the client's real framing.
+		n := -1
+		if len(body) >= 3 {
+			n = int(binary.LittleEndian.Uint16(body[1:3]))
+		}
+		log.Printf("svc5 400: path=%s body_len=%d b0=%d u16_at_1=%d", path, len(body), firstByte(body), n)
+	}
+	return resp
+}
+
+func firstByte(b []byte) int {
+	if len(b) == 0 {
+		return -1
+	}
+	return int(b[0])
 }
 
 type handlerFunc func(ctx context.Context, info xbfeature.Info, body []byte) response

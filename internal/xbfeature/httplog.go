@@ -21,7 +21,13 @@ func LogHTTP(h Handler) Handler { return logged{h} }
 type logged struct{ h Handler }
 
 func (l logged) Serve(ctx context.Context, info Info, c Conn) error {
-	return l.h.Serve(ctx, info, &logConn{Conn: c, info: info})
+	lc := &logConn{Conn: c, info: info}
+	err := l.h.Serve(ctx, info, lc)
+	if lc.pending {
+		log.Printf("xbfeature svc=%d gen=%d req=%q ended without a response (head %d bytes, err=%v)",
+			info.ServiceID, info.Generation, lc.line, len(lc.head), err != nil)
+	}
+	return err
 }
 
 type logConn struct {
