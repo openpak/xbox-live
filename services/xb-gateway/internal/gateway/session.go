@@ -313,6 +313,7 @@ func (s *Session) openTCP(hdr sgwire.TCPHeader, key tcpKey, options []byte, data
 	id, ok := s.services[hdr.Dst]
 	if !ok {
 		s.srv.stats.unauthorizedPort.Add(1)
+		s.srv.log.Info("service open refused: port not in ticket", "port", hdr.Dst, "gen", s.identity.Generation)
 		s.sendReset(hdr, dataLen)
 		return
 	}
@@ -322,7 +323,7 @@ func (s *Session) openTCP(hdr sgwire.TCPHeader, key tcpKey, options []byte, data
 	}
 	backend := s.srv.backends[id]
 	if backend == nil {
-		s.srv.log.Info("service open refused: no backend", "service", id, "port", hdr.Dst)
+		s.srv.log.Info("service open refused: no backend", "service", id, "port", hdr.Dst, "gen", s.identity.Generation)
 		s.srv.stats.unavailable.Add(1)
 		s.sendReset(hdr, dataLen)
 		return
@@ -343,10 +344,12 @@ func (s *Session) openTCP(hdr sgwire.TCPHeader, key tcpKey, options []byte, data
 		} else {
 			s.srv.stats.backendErrors.Add(1)
 		}
+		s.srv.log.Info("service open failed", "service", id, "gen", s.identity.Generation, "unavailable", err == nil || errors.Is(err, ErrUnavailable))
 		s.sendReset(hdr, dataLen)
 		return
 	}
 	c.stream = stream
+	s.srv.log.Info("service open", "service", id, "gen", s.identity.Generation)
 	s.conns[key] = c
 	go s.pump(c)
 	s.sendTCP(c, sgwire.TCPSyn|sgwire.TCPAck, mssSynOptions(), nil)

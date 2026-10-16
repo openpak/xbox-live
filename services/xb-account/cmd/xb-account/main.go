@@ -143,7 +143,7 @@ func run() error {
 		if allowOwner {
 			log.Printf("WARNING: XB_SVC5_TEST_ALLOW_OWNER=1: test deployment, one-user-per-account refusal disabled")
 		}
-		xbfeature.Register(g, &svc5.Server{Names: db, AllowOwner: allowOwner})
+		xbfeature.Register(g, xbfeature.LogHTTP(&svc5.Server{Names: db, AllowOwner: allowOwner}))
 		go func() { done <- g.Serve(lis) }()
 		defer g.Stop()
 		log.Printf("xb-account service 5 (reservename only) on %s", lis.Addr())

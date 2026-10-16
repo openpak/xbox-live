@@ -66,7 +66,7 @@ func run() error {
 		srv.Builtin = set
 		log.Printf("xb-tou built-in OpenPak content enabled for %s (%d files)", v, len(set))
 	}
-	xbfeature.Register(s, srv)
+	xbfeature.Register(s, xbfeature.LogHTTP(srv))
 	log.Printf("xb-tou listening on %s (content %q)", lis.Addr(), os.Getenv("XB_TOU_CONTENT_DIR"))
 	return s.Serve(lis)
 }
