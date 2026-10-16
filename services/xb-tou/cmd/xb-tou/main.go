@@ -59,7 +59,12 @@ func run() error {
 	// XB_TOU_BUILTIN_COUNTRIES (comma-separated ISO codes, e.g. "US,IE")
 	// enables the generated OpenPak content set; unset keeps operator-only.
 	if v := os.Getenv("XB_TOU_BUILTIN_COUNTRIES"); v != "" {
-		set, err := content.Build(strings.Split(v, ","))
+		var cards []string
+		if ct := os.Getenv("XB_TOU_TEST_CARD_TYPES"); ct != "" {
+			cards = strings.Split(ct, ",")
+			log.Printf("WARNING: XB_TOU_TEST_CARD_TYPES=%s: test option, payment-method list populated", ct)
+		}
+		set, err := content.BuildWithCardTypes(strings.Split(v, ","), cards)
 		if err != nil {
 			return err
 		}

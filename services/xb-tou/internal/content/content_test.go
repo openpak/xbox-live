@@ -125,3 +125,25 @@ func TestOperatorFilesWin(t *testing.T) {
 		t.Fatal("built-in not served when operator dir lacks the file")
 	}
 }
+
+func TestCardTypesOptIn(t *testing.T) {
+	plain, _ := Build([]string{"US"})
+	if bytes.Contains(plain["/US/CountryInfo2.INX"], utf16le("CardType")) {
+		t.Fatal("card types present by default")
+	}
+	set, err := BuildWithCardTypes([]string{"US"}, []string{"VISA"})
+	if err != nil || !bytes.Contains(set["/US/CountryInfo2.INX"], utf16le("CreditCardType.CardType=\"VISA\"")) {
+		t.Fatalf("%v", err)
+	}
+	if _, err := BuildWithCardTypes([]string{"US"}, []string{"BITCOIN"}); err == nil {
+		t.Fatal("unknown card type accepted")
+	}
+}
+
+func utf16le(s string) []byte {
+	var b []byte
+	for _, r := range s {
+		b = append(b, byte(r), byte(r>>8))
+	}
+	return b
+}

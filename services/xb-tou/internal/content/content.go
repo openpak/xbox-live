@@ -41,7 +41,22 @@ type Set map[string][]byte
 
 // Build generates the master lists (one copy per region) and, for each
 // country, CountryInfo2.INX plus the four legal documents.
-func Build(codes []string) (Set, error) {
+func Build(codes []string) (Set, error) { return BuildWithCardTypes(codes, nil) }
+
+// CardTypes are the payment-method names the dashboard binary knows (strings
+// in its INX interpreter). The Payment Method list on the signup card screen is
+// filled only from CreditCardType.CardType entries in CountryInfo2.INX.
+var CardTypes = map[string]bool{"VISA": true, "MASTERCARD": true, "AMERICAN_EXPRESS": true, "DISCOVER": true, "DINERS": true, "KLCC": true}
+
+// BuildWithCardTypes is Build plus CreditCardType.CardType entries. OpenPak
+// takes no payments: this is a TEST option for a signup screen that cannot be
+// continued with an empty list. Nothing typed there is read or stored.
+func BuildWithCardTypes(codes, cardTypes []string) (Set, error) {
+	for _, t := range cardTypes {
+		if !CardTypes[t] {
+			return nil, fmt.Errorf("content: unknown card type %q", t)
+		}
+	}
 	if len(codes) == 0 {
 		return nil, fmt.Errorf("content: no countries configured")
 	}
@@ -85,6 +100,9 @@ func Build(codes []string) (Set, error) {
 		must(iw.Set("ParentAge", fmt.Sprint(c.ParentAge)))
 		must(iw.Set("PostalLookup", "0"))
 		must(iw.Set("PostalLookupRightJustify", "0"))
+		for _, t := range cardTypes {
+			must(iw.Set("CreditCardType.CardType", t))
+		}
 		base := "/" + c.Code + "/"
 		set[base+"CountryInfo2.INX"] = iw.Bytes()
 		set[base+"TermsOfUse.ini"] = inx.EncodeText(termsOfUse(c))
