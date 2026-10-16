@@ -19,6 +19,8 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
+	"net"
+	"openpak/xb-live/internal/xbfeature"
 	"openpak/xb-live/services/xb-account/internal/adapter"
 	"openpak/xb-live/services/xb-account/internal/api"
 	"openpak/xb-live/services/xb-account/internal/core"
@@ -26,6 +28,7 @@ import (
 	"openpak/xb-live/services/xb-account/internal/resolver"
 	"openpak/xb-live/services/xb-account/internal/revoke"
 	"openpak/xb-live/services/xb-account/internal/store"
+	"openpak/xb-live/services/xb-account/internal/svc5"
 )
 
 func required(name string) string {
@@ -118,6 +121,28 @@ func run() error {
 	cert, key := required("XB_TLS_CERT_FILE"), required("XB_TLS_KEY_FILE")
 	done := make(chan error, 1)
 	go func() { done <- server.ListenAndServeTLS(cert, key) }()
+	// Optional native service 5 (account signup requests) for the gateway.
+	// Its names are held and checked against this service's own state.
+	if addr := os.Getenv("XB_SVC5_ADDR"); addr != "" {
+		pair, err := tls.LoadX509KeyPair(cert, key)
+		if err != nil {
+			return fmt.Errorf("service 5 TLS: %w", err)
+		}
+		lis, err := net.Listen("tcp", addr)
+		if err != nil {
+			return err
+		}
+		g := grpc.NewServer(grpc.Creds(credentials.NewTLS(&tls.Config{Certificates: []tls.Certificate{pair}, ClientCAs: pool,
+			ClientAuth: tls.RequireAndVerifyClientCert, MinVersion: tls.VersionTLS13})), grpc.MaxRecvMsgSize(256<<10))
+		allowOwner := os.Getenv("XB_SVC5_TEST_ALLOW_OWNER") == "1"
+		if allowOwner {
+			log.Printf("WARNING: XB_SVC5_TEST_ALLOW_OWNER=1: test deployment, one-user-per-account refusal disabled")
+		}
+		xbfeature.Register(g, &svc5.Server{Names: db, AllowOwner: allowOwner})
+		go func() { done <- g.Serve(lis) }()
+		defer g.Stop()
+		log.Printf("xb-account service 5 (reservename only) on %s", lis.Addr())
+	}
 	select {
 	case err := <-done:
 		if !errors.Is(err, http.ErrServerClosed) {
