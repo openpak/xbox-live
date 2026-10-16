@@ -1,19 +1,17 @@
-# MAIN host. Exact-name Xbox discovery behind the established OpenPak resolver, which
-# forwards as/macs/tgs(.part).xboxlive.com here. Not a recursive resolver. Binds
-# loopback only (host network) by default; never publishes public UDP 53.
+# MAIN host. Exact-name Xbox discovery DNS for the test stack, bound ONLY to the ZeroTier
+# address (never public, never the system resolver). Not a recursive resolver.
 [Unit]
-Description=OpenPak Xbox discovery DNS
+Description=OpenPak Xbox discovery DNS (test, ZeroTier only)
 
 [Container]
 ContainerName=openpak-xb-dns
-Image=ghcr.io/openpak/xb-dns@sha256:REPLACE_WITH_DIGEST
+Image=ghcr.io/openpak/xb-dns@sha256:a123e044bb5b2f257816742efc2e0024a4dd4eb945071e8c73499859a2d8484d
 Network=host
 ReadOnly=true
 DropCapability=ALL
 NoNewPrivileges=true
 User=10001:10001
 EnvironmentFile=%h/openpak/deploy/xbox/xb-dns.env
-# no shell in the scratch image, so podman cannot run a HealthCmd; use /healthz on loopback
 HealthCmd=none
 
 [Service]

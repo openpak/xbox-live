@@ -11,7 +11,7 @@ Wants=network-online.target
 [Container]
 ContainerName=openpak-xb-gateway
 # Pin an immutable digest; do not use :latest and no AutoUpdate (rollback needs a known image).
-Image=ghcr.io/openpak/xb-gateway@sha256:REPLACE_WITH_DIGEST
+Image=ghcr.io/openpak/xb-gateway@sha256:2c3feae41fa5dd23c82784dbc2f4eb6bbd62a2faafebf33cc4f9f6e82078de54
 Network=host
 ReadOnly=true
 DropCapability=ALL
@@ -20,7 +20,6 @@ User=10001:10001
 EnvironmentFile=%h/openpak/deploy/xbox/xb-gateway.env
 # mTLS client identity + CA (read-only, owner-local, never baked into an image).
 Volume=%h/openpak/deploy/xbox/pki/gateway:/run/xb:ro
-# no shell in the scratch image, so podman cannot run a HealthCmd; use /healthz on loopback
 HealthCmd=none
 
 [Service]

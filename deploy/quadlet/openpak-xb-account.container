@@ -6,10 +6,12 @@ After=openpak-account.service
 
 [Container]
 ContainerName=openpak-xb-account
-Image=ghcr.io/openpak/xb-account@sha256:REPLACE_WITH_DIGEST
+Image=ghcr.io/openpak/xb-account@sha256:17d83144a3482bde86fc1256a4bd42d535e173a694274dd3a5381c987965e2c1
 Network=openpak.network
 # 10.212.63.196 = main's ZeroTier address. REPLACE_PORT after the audit.
-PublishPort=10.212.63.196:REPLACE_PORT:REPLACE_PORT/tcp
+IP=10.89.2.247
+PublishPort=10.212.63.196:26111:26111/tcp
+PublishPort=10.212.63.196:26113:26113/tcp
 ReadOnly=true
 DropCapability=ALL
 NoNewPrivileges=true

@@ -7,9 +7,9 @@ After=network-online.target
 
 [Container]
 ContainerName=openpak-xb-tou
-Image=localhost/xb-tou:test-20261016-arm64
+Image=ghcr.io/openpak/xb-tou@sha256:792c923dfa0e47f46ba1ce653a83f7aca6c91056a8b723a2ffaa6bf7b4d3bbef
 Network=openpak.network
-IP=REPLACE_IP
+IP=10.89.2.244
 PublishPort=10.212.63.196:26112:26112/tcp
 ReadOnly=true
 DropCapability=ALL

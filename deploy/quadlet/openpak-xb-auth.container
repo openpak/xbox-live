@@ -8,18 +8,18 @@ Wants=openpak-xb-account.service
 
 [Container]
 ContainerName=openpak-xb-auth
-Image=ghcr.io/openpak/xb-auth@sha256:REPLACE_WITH_DIGEST
+Image=ghcr.io/openpak/xb-auth@sha256:c9b6e23259f287f6f2eefcead5a13a2537e69c07a279ea56d7f6725d861594ac
 Network=openpak.network
-# REPLACE_AUTH_PUBLISH: the native auth listener port(s) once xb-auth defines them and the
-# audit shows they are free. Main already has Demonware on UDP 3074; auth does not use it.
+IP=10.89.2.246
+PublishPort=88:8888/udp
+PublishPort=127.0.0.1:8088:8088/tcp
 ReadOnly=true
 DropCapability=ALL
 NoNewPrivileges=true
 User=10001:10001
 EnvironmentFile=%h/openpak/deploy/xbox/xb-auth.env
 Volume=%h/openpak/deploy/xbox/pki/auth:/run/xb:ro
-# Ticket validation key (shared with the gateway) lives here; never in the env file.
-Volume=%h/openpak/deploy/xbox/ticket-keys:/run/xb-ticket:ro
+
 
 [Service]
 Restart=always
