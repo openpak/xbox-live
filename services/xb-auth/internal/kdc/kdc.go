@@ -12,6 +12,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"log"
 	"net/netip"
 	"strconv"
 	"strings"
@@ -110,15 +111,39 @@ func New(cfg Config, accounts xbaccountapi.Resolver, devices DeviceKeys) (*KDC, 
 func (k *KDC) Handle(ctx context.Context, datagram []byte) []byte {
 	req, err := krb.ParseKDCReq(datagram)
 	if err != nil {
+		log.Printf("xb-auth request unparseable len=%d", len(datagram))
 		return nil
 	}
+	start := time.Now()
 	now := k.cfg.Now().UTC().Truncate(time.Second)
+	var reply []byte
 	switch req.MsgType {
 	case krb.MsgASReq:
-		return k.handleAS(ctx, req, now)
+		reply = k.handleAS(ctx, req, now)
 	default:
-		return k.handleTGS(ctx, req, now)
+		reply = k.handleTGS(ctx, req, now)
 	}
+	// One line per request: message type, realm class, result code, duration.
+	// Never names, keys, tickets or pre-authentication data.
+	kind, class := "tgs", "user"
+	if req.MsgType == krb.MsgASReq {
+		kind = "as"
+	}
+	if req.Realm == krb.MACSRealm || req.SName != nil && req.SName.Equal(k.macsName) {
+		class = "macs"
+	}
+	result := "ok"
+	switch {
+	case reply == nil:
+		result = "dropped"
+	case krb.IsError(reply):
+		result = "error"
+		if e, perr := krb.ParseError(reply); perr == nil {
+			result = fmt.Sprintf("error=%d", e.Code)
+		}
+	}
+	log.Printf("xb-auth %s class=%s result=%s dur=%s", kind, class, result, time.Since(start).Round(time.Millisecond))
+	return reply
 }
 
 func (k *KDC) fail(code int32, now time.Time, cname *krb.PrincipalName) []byte {
@@ -322,11 +347,13 @@ func (k *KDC) handleAS(ctx context.Context, req *krb.KDCReq, now time.Time) []by
 			return k.fail(krb.ErrPreauthFailed, now, cname) // a machine account has no machine
 		}
 		if machine, ok = k.machineSession(ctx, raw, now); !ok {
+			log.Printf("xb-auth as: preauth failed: compound machine ticket rejected (payload %d bytes)", len(raw))
 			return k.fail(krb.ErrPreauthFailed, now, cname)
 		}
 	}
 	enc, err := krb.ParseEncryptedData(tsRaw)
 	if err != nil {
+		log.Printf("xb-auth as: preauth failed: PA-ENC-TIMESTAMP not parseable (%d bytes)", len(tsRaw))
 		return k.fail(krb.ErrPreauthFailed, now, cname)
 	}
 	var clientKey xbcrypto.Key
@@ -343,12 +370,14 @@ func (k *KDC) handleAS(ctx context.Context, req *krb.KDCReq, now time.Time) []by
 			continue
 		}
 		if ts, err = krb.ParsePAEncTSEnc(plain); err != nil {
+			log.Printf("xb-auth as: preauth failed: timestamp decrypted but unparseable (plain %d bytes, compound=%t, key id %d)", len(plain), machine != nil, kid)
 			return k.fail(krb.ErrPreauthFailed, now, cname)
 		}
 		clientKey, matched = candidate, true
 		break
 	}
 	if !matched {
+		log.Printf("xb-auth as: preauth failed: timestamp did not decrypt under any user-key candidate (compound=%t, keys=%d)", machine != nil, len(k.cfg.UserKeys.IDs()))
 		return k.fail(krb.ErrPreauthFailed, now, cname)
 	}
 	if !k.skewOK(ts.Time, now) {

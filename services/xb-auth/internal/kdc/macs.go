@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"log"
 	"slices"
 	"strings"
 	"time"
@@ -65,6 +66,7 @@ func (k *KDC) handleMACS(ctx context.Context, req *krb.KDCReq, now time.Time) []
 
 	version, _ := krb.FindPA(req.PAData, krb.PAXboxClientVersion)
 	if _, ok := krb.VerifyClientVersion(machineKey, version); !ok {
+		log.Printf("xb-auth macs: preauth failed: client-version MAC mismatch (%d bytes)", len(version))
 		return k.failMACS(krb.ErrPreauthFailed, now, cname)
 	}
 	// The client version MAC is static per console and release, so it cannot
@@ -72,14 +74,17 @@ func (k *KDC) handleMACS(ctx context.Context, req *krb.KDCReq, now time.Time) []
 	tsRaw, _ := krb.FindPA(req.PAData, krb.PAEncTimestamp)
 	enc, err := krb.ParseEncryptedData(tsRaw)
 	if err != nil {
+		log.Printf("xb-auth macs: preauth failed: PA-ENC-TIMESTAMP not parseable")
 		return k.failMACS(krb.ErrPreauthFailed, now, cname)
 	}
 	plain, err := krb.Open(machineKey, krb.UsageASReqTimestamp, enc)
 	if err != nil {
+		log.Printf("xb-auth macs: preauth failed: timestamp does not decrypt under the machine key")
 		return k.failMACS(krb.ErrPreauthFailed, now, cname)
 	}
 	ts, err := krb.ParsePAEncTSEnc(plain)
 	if err != nil {
+		log.Printf("xb-auth macs: preauth failed: decrypted timestamp unparseable")
 		return k.failMACS(krb.ErrPreauthFailed, now, cname)
 	}
 	if !k.skewOK(ts.Time, now) {
