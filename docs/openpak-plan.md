@@ -1,55 +1,26 @@
-# OpenPak original Xbox service plan
+# Xbox backend source migration plan
 
-## Requirements confirmed 2026-10-16
+The canonical cross-repository architecture is
+[Original Xbox on OpenPak](https://github.com/openpak/docs/blob/main/xbox/native-service-architecture.md).
+It defines the account-core boundary, service-specific runtime images, native
+client path, routing conflict and acceptance milestones. Do not duplicate that
+contract here.
 
-Each Xbox service runs independently on the OpenPak server, in its own runtime
-container image. Never put the whole network into one container or omnibus
-runtime image. Shared protocol libraries and a source workspace are allowed.
-Each service needs separate configuration, secret inputs, health checks and
-independent deployment. Databases and caches remain private infrastructure.
+This repository is a candidate native-protocol base, not a deployed backend.
+The initial source migration is:
 
-The Xbox account adapter integrates with the existing account core, which stays
-console-neutral. Native Xbox identity/protocol/credential translation belongs
-in the adapter; Xombie's database is not a second OpenPak account authority.
-Berth and physical Xbox consoles use the same native protocol endpoints.
+1. Audit the locked dependencies and per-file provenance; preserve AGPL notices.
+2. Remove credential-bearing connection-string and raw authentication logging.
+3. Replace the placeholder API and forwarding stub with the account/provisioning
+   adapter; bind Xbox XUIDs to core accounts using the existing core contract.
+4. Separate KDC/auth and security gateway behind explicit authenticated APIs;
+   keep protocol proof keys out of account core and public logs.
+5. Extract presence/friends and matchmaking from the gateway. Replace empty
+   success replies with implemented behavior or native unavailable errors.
+6. Build one runtime image per service, with isolated configuration/state and
+   health checks. Do not deploy the inherited all-binaries Dockerfile/compose.
+7. Complete native sign-in fixtures, account-core invalidation handling and
+   physical-console acceptance before any production release.
 
-## Candidate base and limits
-
-Xombie is an AGPL-3.0 original Xbox Live proof of concept. It already separates
-API, DNS, Kerberos and security gateway processes, but shares an omnibus runtime
-image. That image is not the production design. Gateway transport may be shared
-on the wire while application work routes to independently deployed services.
-Upstream matchmaking state currently lives inside the security gateway and
-needs explicit separation. Native coverage and console parity are unverified.
-
-## Proposed runtime services
-
-These are responsibilities, not existing deployments or reserved image names.
-
-| Service | Responsibility | Starting point |
-|---|---|---|
-| Xbox account adapter | Native accounts/provisioning; account-core integration | Review API/provisioning code |
-| Xbox authentication | Kerberos ticket operations | `services/kdc` |
-| Xbox security gateway | Native secure transport; route application requests | `services/sg` |
-| Xbox friends/presence | Native representation of shared account-core state | Protocol research |
-| Xbox matchmaking | Session discovery and lifecycle | Review `libs/xombie-matchmaking` and gateway coupling |
-| Xbox statistics | Per-title scores and leaderboards | Protocol research |
-| Xbox content | Update/content delivery where needed | Protocol research |
-| Xbox DNS | Native discovery/redirection if required | Review `services/faux-dns` |
-| Title servers | Title-owned game protocols | Separate image per implementation |
-
-## Implementation gates
-
-1. Audit locked dependencies, per-file provenance, protocol coverage and
-   inherited development constants. Preserve all license notices.
-2. Establish the official-dashboard baseline in Berth and physical hardware.
-3. Specify account-core integration and console/user credential lifecycle from
-   observed native traffic, keeping console secrets out of source control.
-4. Build separate service runtime images, remove omnibus production packaging,
-   and separate gateway transport from application state/handlers.
-5. Validate account linking/authentication, then friends and matchmaking between
-   Berth and a physical Xbox using the same service endpoints.
-6. Prepare established OpenPak deployment artifacts after local validation.
-
-No container build, backend deployment, account-core integration or native
-service compatibility has been demonstrated by this initial fork.
+No Xbox backend container is running as a result of this planning work.
+See [provenance](provenance.md) for the initial review scope.
