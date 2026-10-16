@@ -20,6 +20,7 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	"net"
+	"openpak/xb-live/internal/krb"
 	"openpak/xb-live/internal/xbfeature"
 	"openpak/xb-live/services/xb-account/internal/adapter"
 	"openpak/xb-live/services/xb-account/internal/api"
@@ -39,6 +40,12 @@ func required(name string) string {
 		log.Fatalf("%s is required", name)
 	}
 	return value
+}
+func envOr(name, def string) string {
+	if v := os.Getenv(name); v != "" {
+		return v
+	}
+	return def
 }
 func readSecret(name string) string {
 	data, err := os.ReadFile(required(name))
@@ -143,7 +150,21 @@ func run() error {
 		if allowOwner {
 			log.Printf("WARNING: XB_SVC5_TEST_ALLOW_OWNER=1: test deployment, one-user-per-account refusal disabled")
 		}
-		xbfeature.Register(g, xbfeature.LogHTTP(&svc5.Server{Names: db, AllowOwner: allowOwner}))
+		srv := &svc5.Server{Names: db, AllowOwner: allowOwner, Vouchers: vouchers, Signups: enrolments}
+		// The account record handed out at createowneracct carries the user's
+		// key, derived from the same secret ring xb-auth verifies against.
+		if f := os.Getenv("XB_USER_KEY_SECRETS_FILE"); f != "" {
+			ring, err := krb.LoadKeyring(f, 32)
+			if err != nil {
+				return fmt.Errorf("XB_USER_KEY_SECRETS_FILE: %w", err)
+			}
+			domain, realm := envOr("XB_ACCOUNT_DOMAIN", "xbox.com"), envOr("XB_ACCOUNT_REALM", "passport.net")
+			srv.AccountBlob = func(xuid uint64) ([]byte, error) {
+				_, secret := ring.Active()
+				return svc5.AccountRecord(xuid, krb.DeriveUserKey(secret, xuid), domain, realm)
+			}
+		}
+		xbfeature.Register(g, xbfeature.LogHTTP(srv))
 		go func() { done <- g.Serve(lis) }()
 		defer g.Stop()
 		log.Printf("xb-account service 5 (reservename only) on %s", lis.Addr())

@@ -62,6 +62,11 @@ type Names interface {
 // Server implements xbfeature.Handler for service 5.
 type Server struct {
 	Names Names
+	// Vouchers, Signups and AccountBlob enable verifyvoucher(getoffer),
+	// OfferingDetailsNoUser and createowneracct. Without them those paths stay 501.
+	Vouchers    VoucherChecker
+	Signups     Signups
+	AccountBlob func(xuid uint64) ([]byte, error)
 	// AllowOwner skips the one-user-per-account refusal. TEST DEPLOYMENTS ONLY:
 	// it lets a console whose account already owns a gamertag exercise the
 	// name screens. Nothing is created either way.
@@ -206,14 +211,24 @@ func xerr(code uint32) response { return response{code: 200, xerr: code, hasErr:
 
 func (s *Server) handle(ctx context.Context, info xbfeature.Info, req *http.Request, body []byte) response {
 	path := strings.ToLower(req.URL.Path)
-	if !strings.HasPrefix(path, "/xuacs/") || !strings.HasSuffix(path, ".ashx") {
+	if !strings.HasSuffix(path, ".ashx") {
 		return status(404)
 	}
-	if req.Header.Get("Content-Type") != "xon/5" {
-		return status(400)
+	switch {
+	case strings.HasPrefix(path, "/xuacs/"):
+		if req.Header.Get("Content-Type") != "xon/5" {
+			return status(400)
+		}
+	case path == "/xbos/offeringdetailsnouser.ashx":
+		if req.Header.Get("Content-Type") != "xon/4" {
+			return status(400)
+		}
+	default:
+		return status(404)
 	}
-	if path != "/xuacs/reservename.ashx" {
-		return status(501) // known account requests that are not implemented yet
+	handler := s.route(path)
+	if handler == nil {
+		return status(501) // known requests that are not implemented yet
 	}
 	if req.Method != http.MethodPost {
 		return status(405)
@@ -226,7 +241,30 @@ func (s *Server) handle(ctx context.Context, info xbfeature.Info, req *http.Requ
 	if !s.allow(info.PrincipalID) {
 		return status(429)
 	}
-	return s.reserveName(ctx, info, body)
+	return handler(ctx, info, body)
+}
+
+type handlerFunc func(ctx context.Context, info xbfeature.Info, body []byte) response
+
+// route returns the implementation of an implemented path, nil otherwise.
+func (s *Server) route(path string) handlerFunc {
+	switch path {
+	case "/xuacs/reservename.ashx":
+		return s.reserveName
+	case "/xuacs/verifyvoucher.ashx", "/xuacs/verifyvouchergetoffer.ashx":
+		if s.Vouchers != nil {
+			return s.verifyVoucher
+		}
+	case "/xuacs/createowneracct.ashx":
+		if s.Signups != nil && s.AccountBlob != nil {
+			return s.createOwner
+		}
+	case "/xbos/offeringdetailsnouser.ashx":
+		if s.Vouchers != nil {
+			return s.offeringDetails
+		}
+	}
+	return nil
 }
 
 // parseReserve decodes the request body: machine id (8 bytes, little endian),
