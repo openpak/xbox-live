@@ -11,6 +11,8 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+
+	"openpak/xb-live/internal/xbfeature"
 )
 
 // MTLSFiles locate the gateway's client identity and the CA that signs feature
@@ -40,11 +42,10 @@ func (f MTLSFiles) DialOption() (grpc.DialOption, error) {
 	})), nil
 }
 
-// GRPCBackend is the client stub for a separate feature service. The feature
-// RPC contract (stream open with ConnContext, bidirectional bytes) is not yet
-// defined, so Open reports ErrUnavailable: the console sees a native
-// "unavailable", never an invented success. Replace Open once the service
-// protocol exists; the dial, mTLS and health plumbing are already real.
+// GRPCBackend is the client for a separate feature service speaking the
+// internal/xbfeature stream contract. A service that is down or refuses the
+// stream yields ErrUnavailable: the console sees a native "unavailable",
+// never an invented success.
 type GRPCBackend struct {
 	Target string
 	conn   *grpc.ClientConn
@@ -59,9 +60,20 @@ func NewGRPCBackend(target string, opt grpc.DialOption) (*GRPCBackend, error) {
 	return &GRPCBackend{Target: target, conn: c}, nil
 }
 
-func (b *GRPCBackend) Open(context.Context, ConnContext, Sink) (Stream, error) {
-	return nil, ErrUnavailable
+func (b *GRPCBackend) Open(ctx context.Context, cc ConnContext, sink Sink) (Stream, error) {
+	st, err := xbfeature.Open(ctx, b.conn, xbfeature.Info{PrincipalID: cc.PrincipalID, CoreAccountID: cc.CoreAccountID,
+		XUID: cc.XUID, TitleID: cc.TitleID, ServiceID: cc.ServiceID, Generation: cc.Generation},
+		sink.Send, sink.Close)
+	if err != nil {
+		return nil, ErrUnavailable
+	}
+	return grpcStream{st}, nil
 }
+
+type grpcStream struct{ s *xbfeature.Stream }
+
+func (g grpcStream) Receive(data []byte) error { return g.s.Send(data) }
+func (g grpcStream) Close()                    { g.s.Close() }
 
 // Check reports whether the channel is currently connected (idle counts as reachable).
 func (b *GRPCBackend) Check(ctx context.Context) error {

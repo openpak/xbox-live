@@ -41,3 +41,15 @@ Contracts:
    The channel that delivers it to a console is not built (see xb-auth README).
 7. In-process end-to-end: `test/e2e` (uses `services/*/testkit`, thin wrappers
    exposing the internal packages to tests only).
+8. Gateway -> feature stream (`internal/xbfeature`): one bidirectional gRPC
+   stream (`openpak.xb.v1.Feature/Connect`, `BytesValue` frames, no codegen) per
+   console TCP connection. Frame 1 up = JSON `Info` bound by the gateway from the
+   ticket; frame 1 down = empty ack; then raw bytes. mTLS, and the service must
+   check the client cert URI `spiffe://openpak/xb-gateway` (`PeerIsGateway`).
+   Wired through `XBGW_BACKENDS=<service id>=host:port`. Service 11 (Terms of Use,
+   port 111) is plain HTTP/1.1: the stock 5960 dashboard first asks
+   `GET /Country/America/CountryMaster2.INX` (`Content-type: xon/b`). `xb-tou`
+   serves operator-supplied files only and answers 404 for anything else; the INX
+   format and content are not yet known (no fabricated content).
+9. SG packets to a console carry the console's own init SPI; packets from the
+   console carry the gateway-chosen SPI (Xombie `client_to_sg_spi`).
