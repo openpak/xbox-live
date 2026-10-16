@@ -82,3 +82,22 @@ func TestKeepAliveTraversalAndMethods(t *testing.T) {
 		t.Fatalf("garbage: %q", got)
 	}
 }
+
+func TestBuiltinFallbackAndOperatorPrecedence(t *testing.T) {
+	root := t.TempDir()
+	os.WriteFile(filepath.Join(root, "a"), []byte("OPERATOR"), 0o644)
+	s := &Server{Root: root, Builtin: map[string][]byte{"/a": []byte("BUILTIN"), "/b": []byte("BUILTIN-B")}}
+	req := func(p string) string { return "GET " + p + " HTTP/1.1\r\nHost: x\r\n\r\n" }
+	if got := run(t, s, req("/a")); !strings.HasSuffix(got, "OPERATOR") {
+		t.Fatalf("operator must win: %q", got)
+	}
+	if got := run(t, s, req("/b")); !strings.HasSuffix(got, "BUILTIN-B") {
+		t.Fatalf("builtin fallback: %q", got)
+	}
+	if got := run(t, s, req("/c")); !strings.Contains(got, " 404 ") {
+		t.Fatalf("absent: %q", got)
+	}
+	if got := run(t, &Server{Builtin: s.Builtin}, req("/b")); !strings.HasSuffix(got, "BUILTIN-B") {
+		t.Fatalf("builtin without Root: %q", got)
+	}
+}

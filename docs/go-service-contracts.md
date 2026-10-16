@@ -47,9 +47,14 @@ Contracts:
    ticket; frame 1 down = empty ack; then raw bytes. mTLS, and the service must
    check the client cert URI `spiffe://openpak/xb-gateway` (`PeerIsGateway`).
    Wired through `XBGW_BACKENDS=<service id>=host:port`. Service 11 (Terms of Use,
-   port 111) is plain HTTP/1.1: the stock 5960 dashboard first asks
-   `GET /Country/America/CountryMaster2.INX` (`Content-type: xon/b`). `xb-tou`
-   serves operator-supplied files only and answers 404 for anything else; the INX
-   format and content are not yet known (no fabricated content).
+   TCP port 111) is plain HTTP/1.1. The dashboard asks for
+   `/Country/<Region>/CountryMaster2.INX`, then `/<CC>/CountryInfo2.INX` and
+   `/<CC>/TermsOfUse.ini` (format: workspace `docs/xbox/inx-format.md`).
+   `xb-tou` serves operator-supplied files and, when
+   `XB_TOU_BUILTIN_COUNTRIES` is set, an OpenPak-authored built-in set
+   (`internal/content`); everything else is 404. `/xuacs/accepttou.ashx` is
+   not service 11: the dashboard maps it to service 5 (account). Service 5 is
+   plain HTTP/1.0 (`Content-type: xon/5`, port 105), first seen as
+   `POST /xuacs/reservename.ashx`; xb-tou does not implement it.
 9. SG packets to a console carry the console's own init SPI; packets from the
    console carry the gateway-chosen SPI (Xombie `client_to_sg_spi`).

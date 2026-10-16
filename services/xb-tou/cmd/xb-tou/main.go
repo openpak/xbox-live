@@ -11,11 +11,13 @@ import (
 	"log"
 	"net"
 	"os"
+	"strings"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 
 	"openpak/xb-live/internal/xbfeature"
+	"openpak/xb-live/services/xb-tou/internal/content"
 	"openpak/xb-live/services/xb-tou/internal/tou"
 )
 
@@ -53,7 +55,18 @@ func run() error {
 		return err
 	}
 	s := grpc.NewServer(grpc.Creds(creds), grpc.MaxRecvMsgSize(256<<10))
-	xbfeature.Register(s, &tou.Server{Root: os.Getenv("XB_TOU_CONTENT_DIR")})
+	srv := &tou.Server{Root: os.Getenv("XB_TOU_CONTENT_DIR")}
+	// XB_TOU_BUILTIN_COUNTRIES (comma-separated ISO codes, e.g. "US,IE")
+	// enables the generated OpenPak content set; unset keeps operator-only.
+	if v := os.Getenv("XB_TOU_BUILTIN_COUNTRIES"); v != "" {
+		set, err := content.Build(strings.Split(v, ","))
+		if err != nil {
+			return err
+		}
+		srv.Builtin = set
+		log.Printf("xb-tou built-in OpenPak content enabled for %s (%d files)", v, len(set))
+	}
+	xbfeature.Register(s, srv)
 	log.Printf("xb-tou listening on %s (content %q)", lis.Addr(), os.Getenv("XB_TOU_CONTENT_DIR"))
 	return s.Serve(lis)
 }

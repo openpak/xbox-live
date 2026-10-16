@@ -4,8 +4,8 @@
 // content). The console speaks plain HTTP/1.1 over its security-gateway TCP
 // connection: e.g. "GET /Country/America/CountryMaster2.INX" with
 // "Content-type: xon/b". Content is served only from an operator-supplied
-// directory (the INX files are not synthesised here); anything absent is a
-// plain 404, anything that is not a GET is a 405.
+// directory, or from a built-in OpenPak-authored set when configured (see
+// internal/content); anything else is a plain 404, anything that is not a GET is a 405.
 package tou
 
 import (
@@ -28,8 +28,12 @@ const maxFile = 4 << 20
 
 // Server implements xbfeature.Handler.
 type Server struct {
-	// Root is the content directory; request paths map below it.
+	// Root is the operator content directory; request paths map below it.
 	Root string
+	// Builtin is an optional OpenPak-authored content set (path with leading
+	// slash -> bytes), enabled by configuration. Operator files win; any path
+	// in neither place is a 404.
+	Builtin map[string][]byte
 }
 
 type connReader struct {
@@ -76,13 +80,16 @@ func (s *Server) lookup(req *http.Request) (int, string) {
 		return 405, "Method Not Allowed"
 	}
 	clean := path.Clean("/" + req.URL.Path)
-	if s.Root == "" || strings.ContainsRune(clean, 0) {
+	if strings.ContainsRune(clean, 0) {
 		return 404, "Not Found"
+	}
+	if s.Root == "" {
+		return s.builtin(clean)
 	}
 	f := filepath.Join(s.Root, filepath.FromSlash(clean))
 	st, err := os.Stat(f)
 	if err != nil || !st.Mode().IsRegular() {
-		return 404, "Not Found"
+		return s.builtin(clean)
 	}
 	if st.Size() > maxFile {
 		return 500, "Internal Server Error"
@@ -92,6 +99,13 @@ func (s *Server) lookup(req *http.Request) (int, string) {
 		return 500, "Internal Server Error"
 	}
 	return 200, string(b)
+}
+
+func (s *Server) builtin(clean string) (int, string) {
+	if b, ok := s.Builtin[clean]; ok {
+		return 200, string(b)
+	}
+	return 404, "Not Found"
 }
 
 func (s *Server) respond(c xbfeature.Conn, req *http.Request, code int, body string, close bool) error {
