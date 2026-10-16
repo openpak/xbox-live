@@ -361,7 +361,7 @@ func ParseKDCReq(b []byte) (*KDCReq, error) {
 	if v, err = bf.need(7); err != nil {
 		return nil, err
 	}
-	if r.Nonce, err = readUint32(v); err != nil {
+	if r.Nonce, err = readNonce(v); err != nil {
 		return nil, err
 	}
 	if v, err = bf.need(8); err != nil {
@@ -390,7 +390,7 @@ func MarshalKDCReq(r *KDCReq) []byte {
 		ets = append(ets, intg(int64(e)))
 	}
 	body = append(body, ctx(5, genTime(time.Date(2037, 9, 13, 2, 48, 5, 0, time.UTC))),
-		ctx(7, intg(int64(r.Nonce))), ctx(8, seq(ets...)))
+		ctx(7, intg(int64(int32(r.Nonce)))), ctx(8, seq(ets...)))
 	parts := [][]byte{ctx(1, intg(PVNO)), ctx(2, intg(int64(r.MsgType)))}
 	if r.PAData != nil {
 		parts = append(parts, ctx(3, marshalPAData(r.PAData)))
@@ -605,7 +605,7 @@ func (e *EncKDCRepPart) Marshal(msgType int) []byte {
 	parts := [][]byte{
 		ctx(0, e.Key.marshal()),
 		ctx(1, seq()), // empty last-req, as Xombie sends
-		ctx(2, intg(int64(e.Nonce))),
+		ctx(2, intg(int64(int32(e.Nonce)))),
 	}
 	if e.KeyExpiry != nil {
 		parts = append(parts, ctx(3, genTime(*e.KeyExpiry)))
@@ -643,7 +643,7 @@ func ParseEncKDCRepPart(b []byte, msgType int) (*EncKDCRepPart, error) {
 	if v, err = f.need(2); err != nil {
 		return nil, err
 	}
-	if e.Nonce, err = readUint32(v); err != nil {
+	if e.Nonce, err = readNonce(v); err != nil {
 		return nil, err
 	}
 	if v, ok := f[3]; ok {

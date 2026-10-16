@@ -284,3 +284,16 @@ func readList(b []byte, fn func(elem []byte) error) error {
 	}
 	return nil
 }
+
+// readNonce reads a 32-bit nonce. Real Xbox clients encode a random 32-bit
+// value as a signed (two's complement) INTEGER, so about half of all nonces are
+// negative on the wire; Xombie-style positive values above 2^31 are accepted
+// too. The result is the 32-bit pattern; replies re-encode it as signed int32,
+// which is the form the client sent and compares against.
+func readNonce(b []byte) (uint32, error) {
+	v, err := readInt(b)
+	if err != nil || v < -1<<31 || v > 1<<32-1 {
+		return 0, malformed("nonce range")
+	}
+	return uint32(v), nil
+}
