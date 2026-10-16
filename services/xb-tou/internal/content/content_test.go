@@ -135,6 +135,9 @@ func TestCardTypesOptIn(t *testing.T) {
 	if err != nil || !bytes.Contains(set["/US/CountryInfo2.INX"], utf16le("CreditCardType.CardType=\"VISA\"")) {
 		t.Fatalf("%v", err)
 	}
+	if !bytes.Contains(set["/US/CountryInfo2.INX"], utf16le("CreditCardNumber.Max=\"19\"")) || bytes.Contains(plain["/US/CountryInfo2.INX"], utf16le("PhoneNumber.Max")) {
+		t.Fatal("field limits missing with card types or present without")
+	}
 	if _, err := BuildWithCardTypes([]string{"US"}, []string{"BITCOIN"}); err == nil {
 		t.Fatal("unknown card type accepted")
 	}

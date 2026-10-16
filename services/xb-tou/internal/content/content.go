@@ -103,6 +103,15 @@ func BuildWithCardTypes(codes, cardTypes []string) (Set, error) {
 		for _, t := range cardTypes {
 			must(iw.Set("CreditCardType.CardType", t))
 		}
+		if len(cardTypes) > 0 {
+			// A field class created without Min/Max has length 0 and the
+			// dashboard's keyboard accepts no characters (RE: the INX field
+			// handler stores Min/Max, default 0). Lengths only; no Formula.
+			for _, f := range [][3]string{{"CreditCardNumber", "12", "19"}, {"PhoneNumber", "7", "15"}, {"PostalCode", "3", "10"}} {
+				must(iw.Set(f[0]+".Min", f[1]))
+				must(iw.Set(f[0]+".Max", f[2]))
+			}
+		}
 		base := "/" + c.Code + "/"
 		set[base+"CountryInfo2.INX"] = iw.Bytes()
 		set[base+"TermsOfUse.ini"] = inx.EncodeText(termsOfUse(c))
