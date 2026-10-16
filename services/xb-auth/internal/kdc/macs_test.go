@@ -165,9 +165,19 @@ func TestMachineAndUserSignInEndToEnd(t *testing.T) {
 	e.clock.Advance(time.Second)
 	e.mustErr(e.handle(e.asReq(e.userKey(), e.clock.Now(), 4, withMachine)), krb.ErrPreauthFailed)
 	e.mustErr(e.handle(e.asReq(compound, e.clock.Now(), 4)), krb.ErrPreauthFailed)
-	// A machine TGT is not a user TGT at the TGS.
+	// A machine TGT gets a service ticket for the machine account itself (the
+	// pre-sign-in account-creation path a real console takes), but only while
+	// the device stays admitted.
+	mreply := e.handle(e.tgsReq(tgt{ticket: machineTGT, session: machineSession},
+		tgsOpts{cname: machineName, ids: []uint32{6}}))
+	if _, err := krb.ParseKDCRep(mreply, krb.MsgTGSRep); err != nil {
+		t.Fatalf("machine TGS failed: %x", mreply)
+	}
+	e.provisionDevice(xbaccountapi.StatusRevoked, true)
+	e.clock.Advance(time.Second)
 	e.mustErr(e.handle(e.tgsReq(tgt{ticket: machineTGT, session: machineSession},
-		tgsOpts{cname: machineName})), krb.ErrAPModified)
+		tgsOpts{cname: machineName, ids: []uint32{6}})), krb.ErrClientRevoked)
+	e.provisionDevice(xbaccountapi.StatusActive, true)
 	// A user TGT is not a machine identity, and garbage is not a ticket.
 	userTGT := e.login()
 	e.clock.Advance(time.Second)

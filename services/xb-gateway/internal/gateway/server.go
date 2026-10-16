@@ -151,7 +151,7 @@ var errReject = errors.New("init rejected")
 
 func (s *Server) reject(reason string) {
 	s.stats.initRejected.Add(1)
-	s.log.Debug("init rejected", "reason", reason)
+	s.log.Info("init rejected", "reason", reason)
 }
 
 func (s *Server) handleInit(pkt []byte, peer netip.AddrPort) {

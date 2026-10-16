@@ -16,7 +16,15 @@ import (
 type AccountDirectory struct{ Resolver xbaccountapi.Resolver }
 
 func (d AccountDirectory) ResolveUser(ctx context.Context, xuid uint64) (Principal, error) {
-	p, err := d.Resolver.ResolveUser(ctx, fmt.Sprintf("%016x", xuid))
+	id := fmt.Sprintf("%016x", xuid)
+	// A console that has no user yet (account creation) holds a service ticket
+	// for its machine account; the ticket's identity is the machine ID, a range
+	// disjoint from user XUIDs.
+	resolve := d.Resolver.ResolveUser
+	if xbaccountapi.ValidMachineID(id) {
+		resolve = d.Resolver.ResolveDevice
+	}
+	p, err := resolve(ctx, id)
 	if err != nil {
 		return Principal{}, err
 	}

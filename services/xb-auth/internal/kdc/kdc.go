@@ -447,11 +447,24 @@ func (k *KDC) handleTGS(ctx context.Context, req *krb.KDCReq, now time.Time) []b
 	if tgt.CRealm != k.cfg.Realm || tgt.Key.Type != krb.ETypeRC4HMAC {
 		return k.fail(krb.ErrAPModified, now, cname)
 	}
-	var tgtXUID uint64
+	var tgtXUID, tgtDevice uint64
 	for _, ad := range tgt.AuthData {
-		if ad.Type == krb.ADUsers && len(ad.Data) == 8 {
+		switch {
+		case ad.Type == krb.ADUsers && len(ad.Data) == 8:
 			tgtXUID = binary.LittleEndian.Uint64(ad.Data)
+		case ad.Type == krb.ADDevice && len(ad.Data) == 8:
+			tgtDevice = binary.LittleEndian.Uint64(ad.Data)
 		}
+	}
+	// A machine TGT (device entry, no user) may request a service ticket for
+	// the machine account itself, as a real console does before any user has
+	// signed in (account creation). A TGT carrying both is malformed.
+	if tgtXUID != 0 && tgtDevice != 0 {
+		return k.fail(krb.ErrAPModified, now, cname)
+	}
+	machineOnly := tgtXUID == 0 && tgtDevice != 0
+	if machineOnly {
+		tgtXUID = tgtDevice
 	}
 	sessionKey, err := krb.ToKey(tgt.Key.Value)
 	if err != nil || tgtXUID == 0 {
@@ -479,9 +492,13 @@ func (k *KDC) handleTGS(ctx context.Context, req *krb.KDCReq, now time.Time) []b
 		return k.fail(krb.ErrSPrincipalUnknown, now, cname)
 	}
 
-	// Re-check admission by XUID on every request so a ban or unlink stops new
-	// tickets at once. (A device TGT has no user entry and is refused above.)
-	if code := k.admitUser(ctx, tgtXUID); code != 0 {
+	// Re-check admission on every request so a ban or unlink stops new
+	// tickets at once.
+	admit := k.admitUser
+	if machineOnly {
+		admit = k.admitDevice
+	}
+	if code := admit(ctx, tgtXUID); code != 0 {
 		return k.fail(code, now, cname)
 	}
 	principal := struct{ XUID uint64 }{tgtXUID}
