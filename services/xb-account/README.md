@@ -67,3 +67,14 @@ deterministic idempotency keys; terminal failures UnlinkLink and burn the token.
 **Generic password verification is not Kerberos proof.** Neither a core password
 check, a provisioning token, nor the stored device proof MAC authenticates a
 native Kerberos exchange; xb-auth must validate pre-authentication itself.
+
+## Device-pairing enrolment and subscription codes
+
+`internal/enrol` and `internal/voucher` add enrolment without the dashboard
+supplying the machine key: a console tool registers a pending enrolment through
+`xb-enroll` (SPIFFE `spiffe://openpak/xb-enroll`, two routes only), the website
+approves it for a core account (SPIFFE `xb-provisioner`), and the device is
+linked (ReserveLink/ActivateLink, XUID reserved, no gamertag yet). Subscription
+codes are issued by the website and consumed by `enrol.CompleteSignup`. Routes,
+states, limits and error codes: workspace `docs/xbox/enrolment-contract.md`.
+The service-5 wire handling for verifyvoucher/createowneracct is not implemented.

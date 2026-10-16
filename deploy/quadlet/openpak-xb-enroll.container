@@ -1,0 +1,32 @@
+# TEMPLATE, NOT DEPLOYED. Public device-pairing front (two routes). Exposing it is a
+# deliberate decision: pick the hostname, add a Traefik router for PathPrefix(`/v1/`)
+# only (TLS terminated by Traefik, ideally with an extra rate-limit middleware), and
+# issue the spiffe://openpak/xb-enroll client certificate from the xb CA first.
+# Runs on the MAIN host next to Traefik; talks to xb-account over mTLS on the private
+# address. Holds no state.
+[Unit]
+Description=OpenPak Xbox device-pairing enrolment front (public HTTP behind Traefik)
+After=openpak-xb-account.service
+Wants=openpak-xb-account.service
+
+[Container]
+ContainerName=openpak-xb-enroll
+Image=ghcr.io/openpak/xb-enroll@sha256:REPLACE_WITH_DIGEST
+Network=openpak.network
+IP=REPLACE_IP
+ReadOnly=true
+DropCapability=ALL
+NoNewPrivileges=true
+User=10001:10001
+EnvironmentFile=%h/openpak/deploy/xbox/xb-enroll.env
+Volume=%h/openpak/deploy/xbox/pki/enroll:/run/xb:ro
+HealthCmd=/xb-enroll healthcheck
+HealthInterval=30s
+# No PublishPort: only Traefik (same container network) reaches :8080.
+
+[Service]
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=default.target

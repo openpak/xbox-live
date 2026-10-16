@@ -14,13 +14,16 @@ import (
 	"net/http"
 
 	"openpak/xb-live/internal/xbaccountapi"
+	"openpak/xb-live/services/xb-account/internal/enrol"
 	"openpak/xb-live/services/xb-account/internal/provision"
+	"openpak/xb-live/services/xb-account/internal/voucher"
 )
 
 const (
 	Auth        = "spiffe://openpak/xb-auth"
 	Gateway     = "spiffe://openpak/xb-gateway"
 	Provisioner = "spiffe://openpak/xb-provisioner" // web approval side
+	Enroll      = "spiffe://openpak/xb-enroll"      // public device-pairing front; two routes only
 )
 
 // Peer reports whether the verified TLS peer carries one of the allowed URIs.
@@ -51,7 +54,19 @@ func Only(h http.Handler, allowed ...string) http.Handler {
 
 // Handler mounts the contract (auth, gateway) and provisioning routes.
 func Handler(res xbaccountapi.Resolver, rev xbaccountapi.Revocations, keys xbaccountapi.DeviceKeys, prov *provision.Provisioner) http.Handler {
+	return HandlerFull(res, rev, keys, prov, nil, nil)
+}
+
+// HandlerFull is Handler plus the device-pairing enrolment and subscription
+// code routes (see enrol.go); either may be nil to leave its routes unmounted.
+func HandlerFull(res xbaccountapi.Resolver, rev xbaccountapi.Revocations, keys xbaccountapi.DeviceKeys, prov *provision.Provisioner, enr *enrol.Service, vch *voucher.Service) http.Handler {
 	mux := http.NewServeMux()
+	if enr != nil {
+		mountEnrol(mux, enr)
+	}
+	if vch != nil {
+		mountVoucher(mux, vch)
+	}
 	// Device proof material goes to xb-auth only, never the gateway.
 	mux.Handle("GET /internal/v1/devices/{id}/key", Only(xbaccountapi.KeyHandler(keys), Auth))
 	mux.Handle("/internal/v1/users/", Only(xbaccountapi.Handler(res, rev), Auth, Gateway))

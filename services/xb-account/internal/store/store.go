@@ -91,6 +91,10 @@ func Open(path string, pepper []byte) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
+	if err := migrateEnrol(db); err != nil {
+		db.Close()
+		return nil, err
+	}
 	return &Store{db: db, pepper: append([]byte(nil), pepper...), now: time.Now}, nil
 }
 
@@ -179,6 +183,11 @@ type User struct {
 type Device struct {
 	MachineID, CoreAccountID string
 	Status                   xbaccountapi.Status
+	// XUID and LinkID are the account's reserved Xbox link. Signup is
+	// SignupAwaitingGamertag between enrolment approval and the dashboard
+	// signup, SignupComplete otherwise (every legacy provisioned device).
+	XUID, LinkID string
+	Signup       string
 }
 
 func (s *Store) GetUser(ctx context.Context, xuid string) (User, error) {
@@ -209,8 +218,8 @@ func (s *Store) GetUserByGamertag(ctx context.Context, tag string) (User, error)
 func (s *Store) GetDevice(ctx context.Context, machineID string) (Device, error) {
 	var d Device
 	var st string
-	err := s.db.QueryRowContext(ctx, `SELECT machine_id,core_account_id,status FROM devices WHERE machine_id=?`, machineID).
-		Scan(&d.MachineID, &d.CoreAccountID, &st)
+	err := s.db.QueryRowContext(ctx, `SELECT machine_id,core_account_id,status,xuid,link_id,signup FROM devices WHERE machine_id=?`, machineID).
+		Scan(&d.MachineID, &d.CoreAccountID, &st, &d.XUID, &d.LinkID, &d.Signup)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Device{}, ErrNotFound
 	}
@@ -342,7 +351,7 @@ func (s *Store) CommitProvision(ctx context.Context, p Provision) error {
 			xbaccountapi.Status(st) == xbaccountapi.StatusBanned:
 			return ErrConflict
 		default: // re-provisioning the same account's device, or reviving a revoked one
-			_, err = t.ExecContext(ctx, `UPDATE devices SET core_account_id=?,status='active',proof_mac=?,proof_sealed=?,updated=? WHERE machine_id=?`, p.CoreAccountID, p.ProofMAC, p.ProofSealed, n, p.MachineID)
+			_, err = t.ExecContext(ctx, `UPDATE devices SET core_account_id=?,status='active',xuid='',link_id='',signup='complete',proof_mac=?,proof_sealed=?,updated=? WHERE machine_id=?`, p.CoreAccountID, p.ProofMAC, p.ProofSealed, n, p.MachineID)
 		}
 		if err != nil {
 			return conflict(err)
@@ -471,8 +480,13 @@ func (s *Store) effects(ctx context.Context, t *sql.Tx, c Change, n int64) error
 		}
 	}
 	if c.UnlinkXUID != "" {
+		// The XUID is either a user's or, between enrolment approval and
+		// signup, a device's reserved link subject (no users row yet).
 		var acct string
 		err := t.QueryRowContext(ctx, `SELECT core_account_id FROM users WHERE xuid=?`, c.UnlinkXUID).Scan(&acct)
+		if errors.Is(err, sql.ErrNoRows) {
+			err = t.QueryRowContext(ctx, `SELECT core_account_id FROM devices WHERE xuid=?`, c.UnlinkXUID).Scan(&acct)
+		}
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}

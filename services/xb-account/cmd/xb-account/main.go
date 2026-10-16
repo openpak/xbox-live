@@ -24,11 +24,13 @@ import (
 	"openpak/xb-live/services/xb-account/internal/adapter"
 	"openpak/xb-live/services/xb-account/internal/api"
 	"openpak/xb-live/services/xb-account/internal/core"
+	"openpak/xb-live/services/xb-account/internal/enrol"
 	"openpak/xb-live/services/xb-account/internal/provision"
 	"openpak/xb-live/services/xb-account/internal/resolver"
 	"openpak/xb-live/services/xb-account/internal/revoke"
 	"openpak/xb-live/services/xb-account/internal/store"
 	"openpak/xb-live/services/xb-account/internal/svc5"
+	"openpak/xb-live/services/xb-account/internal/voucher"
 )
 
 func required(name string) string {
@@ -98,12 +100,15 @@ func run() error {
 	coreAPI := core.New(conn, coreKey)
 	res := &resolver.Resolver{Core: coreAPI, Store: db}
 	prov := &provision.Provisioner{Core: coreAPI, Store: db}
+	vouchers := &voucher.Service{Core: coreAPI, Store: db}
+	enrolments := &enrol.Service{Core: coreAPI, Store: db, Vouchers: vouchers}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
 	go (&revoke.Processor{Core: coreAPI, Store: db}).Run(ctx, 2*time.Second)
 	go func() {
 		for ctx.Err() == nil {
 			prov.Reap(ctx)
+			enrolments.Reap(ctx)
 			select {
 			case <-ctx.Done():
 			case <-time.After(time.Minute):
@@ -114,7 +119,7 @@ func run() error {
 	legacy := api.Only(adapter.Handler(adapter.NewCore(conn, coreKey)), api.Auth, api.Gateway)
 	mux.Handle("/internal/v1/resolve", legacy)
 	mux.Handle("/livez", legacy)
-	mux.Handle("/", api.Handler(res, res, res, prov))
+	mux.Handle("/", api.HandlerFull(res, res, res, prov, enrolments, vouchers))
 	handler := http.Handler(mux)
 	addr := required("XB_LISTEN_ADDR")
 	server := &http.Server{Addr: addr, Handler: handler, TLSConfig: cfg, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 5 * time.Second, WriteTimeout: 35 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 8192}
@@ -163,7 +168,7 @@ func workloadTLS(pool *x509.CertPool) *tls.Config {
 			}
 			for _, uri := range state.PeerCertificates[0].URIs {
 				// Per-route authorization (internal/api) narrows this further.
-				if u := uri.String(); u == api.Auth || u == api.Gateway || u == api.Provisioner {
+				if u := uri.String(); u == api.Auth || u == api.Gateway || u == api.Provisioner || u == api.Enroll {
 					return nil
 				}
 			}

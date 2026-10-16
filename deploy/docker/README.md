@@ -5,6 +5,7 @@
 | xb-gateway | Dockerfile.xb-gateway | builds from `services/xb-gateway` |
 | xb-account | Dockerfile.xb-account | builds from `services/xb-account` (the service's own Dockerfile is equivalent) |
 | xb-auth | Dockerfile.xb-auth | builds once `services/xb-auth/cmd/xb-auth` exists |
+| xb-enroll | Dockerfile.xb-enroll | builds from `services/xb-enroll`; template only, not deployed (public exposure is a decision) |
 | xb-social | none | planned; no Dockerfile or unit is shipped so nothing can be mistaken for a working endpoint |
 
 Later feature services (presence, matchmaking, stats, etc.) follow the same

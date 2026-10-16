@@ -99,6 +99,7 @@ func (p *pki) client(t *testing.T, spiffe string) *http.Client {
 
 type world struct {
 	t        *testing.T
+	p        *pki
 	acct     *account.Account
 	base     string
 	prov     *http.Client
@@ -143,7 +144,7 @@ func newWorld(t *testing.T) *world {
 	srv.StartTLS()
 	t.Cleanup(srv.Close)
 
-	w := &world{t: t, acct: a, base: srv.URL, prov: p.client(t, account.Provisioner),
+	w := &world{t: t, p: p, acct: a, base: srv.URL, prov: p.client(t, account.Provisioner),
 		authC:    &xbaccountapi.Client{Base: srv.URL, HTTP: p.client(t, account.Auth)},
 		sgKeys:   ring(t, 16, 0x31),
 		userKeys: ring(t, 32, 0x57)}

@@ -45,7 +45,7 @@ func TestMutualTLSWorkloadAuthorization(t *testing.T) {
 		uri  string
 		want bool
 	}{
-		{"spiffe://openpak/xb-auth", true}, {"spiffe://openpak/xb-gateway", true},
+		{"spiffe://openpak/xb-auth", true}, {"spiffe://openpak/xb-gateway", true}, {"spiffe://openpak/xb-enroll", true},
 		{"spiffe://openpak/x360-auth", false}, {"spiffe://openpak/xb-social", false},
 		{"", false}, {"missing-certificate", false},
 	} {

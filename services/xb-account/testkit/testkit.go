@@ -10,14 +10,18 @@ import (
 	"context"
 	"net/http"
 	"path/filepath"
+	"sync"
+	"time"
 
 	"openpak/xb-live/services/xb-account/internal/api"
 	pb "openpak/xb-live/services/xb-account/internal/corepb"
 	"openpak/xb-live/services/xb-account/internal/coretest"
+	"openpak/xb-live/services/xb-account/internal/enrol"
 	"openpak/xb-live/services/xb-account/internal/provision"
 	"openpak/xb-live/services/xb-account/internal/resolver"
 	"openpak/xb-live/services/xb-account/internal/revoke"
 	"openpak/xb-live/services/xb-account/internal/store"
+	"openpak/xb-live/services/xb-account/internal/voucher"
 )
 
 // SPIFFE identities the routes authorize.
@@ -25,6 +29,7 @@ const (
 	Auth        = api.Auth
 	Gateway     = api.Gateway
 	Provisioner = api.Provisioner
+	Enroll      = api.Enroll
 )
 
 // Account is a running xb-account stack. Handler must be served over mutual
@@ -34,6 +39,26 @@ type Account struct {
 	Core    *coretest.Core
 	db      *store.Store
 	proc    *revoke.Processor
+	// Enrol and Vouchers are the in-process services behind the enrolment
+	// routes, for tests that play the dashboard (CompleteSignup, Check).
+	Enrol    *enrol.Service
+	Vouchers *voucher.Service
+
+	mu     sync.Mutex
+	offset time.Duration
+}
+
+// Advance moves the stack's clock forward (enrolment/voucher expiry tests).
+func (a *Account) Advance(d time.Duration) {
+	a.mu.Lock()
+	a.offset += d
+	a.mu.Unlock()
+}
+
+func (a *Account) now() time.Time {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return time.Now().Add(a.offset)
 }
 
 // New opens a store under dir. Close it when done.
@@ -45,7 +70,12 @@ func New(dir string) (*Account, error) {
 	c := coretest.New()
 	res := &resolver.Resolver{Core: c, Store: db}
 	prov := &provision.Provisioner{Core: c, Store: db}
-	return &Account{Handler: api.Handler(res, res, res, prov), Core: c, db: db, proc: &revoke.Processor{Core: c, Store: db}}, nil
+	a := &Account{Core: c, db: db, proc: &revoke.Processor{Core: c, Store: db}}
+	db.SetClock(a.now)
+	a.Vouchers = &voucher.Service{Core: c, Store: db, Now: a.now}
+	a.Enrol = &enrol.Service{Core: c, Store: db, Vouchers: a.Vouchers, Now: a.now}
+	a.Handler = api.HandlerFull(res, res, res, prov, a.Enrol, a.Vouchers)
+	return a, nil
 }
 
 func (a *Account) Close() error { return a.db.Close() }
@@ -71,4 +101,13 @@ func (a *Account) RevokeLinkInCore(ctx context.Context, xuid string) error {
 	}
 	a.Core.SetLinkState(l.LinkID, pb.LinkState_LINK_STATE_REVOKED)
 	return nil
+}
+
+// DeviceXUID returns the XUID reserved for an enrolled device.
+func (a *Account) DeviceXUID(t interface{ Fatalf(string, ...any) }, machineID string) string {
+	d, err := a.db.GetDevice(context.Background(), machineID)
+	if err != nil || d.XUID == "" {
+		t.Fatalf("no device XUID: %v", err)
+	}
+	return d.XUID
 }
