@@ -143,6 +143,19 @@ func (k *KDC) Handle(ctx context.Context, datagram []byte) []byte {
 		}
 	}
 	log.Printf("xb-auth %s class=%s result=%s dur=%s", kind, class, result, time.Since(start).Round(time.Millisecond))
+	if reply != nil && krb.IsError(reply) {
+		// Request shape only (pre-auth types, name kind), never values.
+		var pa []int32
+		for _, d := range req.PAData {
+			pa = append(pa, d.Type)
+		}
+		nameType, machineName := -1, false
+		if req.CName != nil {
+			nameType = int(req.CName.Type)
+			machineName = len(req.CName.Parts) == 1 && strings.HasPrefix(strings.ToUpper(req.CName.Parts[0]), "SN.")
+		}
+		log.Printf("xb-auth %s error shape: pa=%v cname_type=%d machine_name=%t etypes=%v", kind, pa, nameType, machineName, req.ETypes)
+	}
 	return reply
 }
 
@@ -294,6 +307,39 @@ func (k *KDC) machineSession(ctx context.Context, value []byte, now time.Time) (
 	return &key, true
 }
 
+// userSession validates the compound-identity payload of a machine account's AS
+// request: exactly one unexpired TGT this KDC issued to a user (users entry,
+// no device) who is still admitted. It returns the TGT session key and the XUID.
+func (k *KDC) userSession(ctx context.Context, value []byte, now time.Time) (xbcrypto.Key, uint64, bool) {
+	var zero xbcrypto.Key
+	tickets, err := krb.ParseTicketSequence(value)
+	if err != nil || len(tickets) != 1 || !tickets[0].SName.Equal(k.tgsName) {
+		return zero, 0, false
+	}
+	part, err := krb.OpenTicket(k.cfg.TGSKeys, krb.UsageTicket, tickets[0])
+	if err != nil || part.CRealm != k.cfg.Realm || part.Key.Type != krb.ETypeRC4HMAC ||
+		part.Flags&krb.FlagInvalid != 0 || part.Start().After(now.Add(k.cfg.ClockSkew)) || !part.EndTime.After(now) {
+		return zero, 0, false
+	}
+	var xuid uint64
+	for _, ad := range part.AuthData {
+		switch {
+		case ad.Type == krb.ADDevice:
+			return zero, 0, false
+		case ad.Type == krb.ADUsers && len(ad.Data) == 8:
+			xuid = binary.LittleEndian.Uint64(ad.Data)
+		}
+	}
+	if xuid == 0 || k.admitUser(ctx, xuid) != 0 {
+		return zero, 0, false
+	}
+	key, err := krb.ToKey(part.Key.Value)
+	if err != nil {
+		return zero, 0, false
+	}
+	return key, xuid, true
+}
+
 func (k *KDC) handleAS(ctx context.Context, req *krb.KDCReq, now time.Time) []byte {
 	if req.SName != nil && req.SName.Equal(k.macsName) {
 		return k.handleMACS(ctx, req, now)
@@ -342,11 +388,20 @@ func (k *KDC) handleAS(ctx context.Context, req *krb.KDCReq, now time.Time) []by
 	}
 
 	var machine *xbcrypto.Key
+	authDatas := []krb.AuthData{authData}
 	if raw, present := findAny(req.PAData, krb.PACompoundIdentity); present {
 		if authData.Type == krb.ADDevice {
-			return k.fail(krb.ErrPreauthFailed, now, cname) // a machine account has no machine
-		}
-		if machine, ok = k.machineSession(ctx, raw, now); !ok {
+			// Observed from a real console: after the user's own AS, the machine
+			// account asks again with the user's TGT as compound identity. The
+			// resulting TGT carries the device and that user.
+			key, uid, uok := k.userSession(ctx, raw, now)
+			if !uok {
+				log.Printf("xb-auth as: preauth failed: compound user ticket rejected (payload %d bytes)", len(raw))
+				return k.fail(krb.ErrPreauthFailed, now, cname)
+			}
+			machine = &key
+			authDatas = append(authDatas, krb.AuthData{Type: krb.ADUsers, Data: xuidLE(uid)})
+		} else if machine, ok = k.machineSession(ctx, raw, now); !ok {
 			log.Printf("xb-auth as: preauth failed: compound machine ticket rejected (payload %d bytes)", len(raw))
 			return k.fail(krb.ErrPreauthFailed, now, cname)
 		}
@@ -401,7 +456,7 @@ func (k *KDC) handleAS(ctx context.Context, req *krb.KDCReq, now time.Time) []by
 		CName:     *cname,
 		Transited: krb.Transited{Type: 1, Contents: []byte(k.cfg.Realm + "\x00")},
 		AuthTime:  now, StartTime: &start, EndTime: end,
-		AuthData: []krb.AuthData{authData},
+		AuthData: authDatas,
 	}
 	tgsID, tgsRaw := k.cfg.TGSKeys.Active()
 	tgsKey, _ := krb.ToKey(tgsRaw)
@@ -487,10 +542,10 @@ func (k *KDC) handleTGS(ctx context.Context, req *krb.KDCReq, now time.Time) []b
 	}
 	// A machine TGT (device entry, no user) may request a service ticket for
 	// the machine account itself, as a real console does before any user has
-	// signed in (account creation). A TGT carrying both is malformed.
-	if tgtXUID != 0 && tgtDevice != 0 {
-		return k.fail(krb.ErrAPModified, now, cname)
-	}
+	// signed in (account creation). A TGT carrying both a device and a user is the
+	// console's machine+user logon (machine AS with the user's TGT as compound
+	// identity); tickets from it are issued for the user, and the device must
+	// still be admitted.
 	machineOnly := tgtXUID == 0 && tgtDevice != 0
 	if machineOnly {
 		tgtXUID = tgtDevice
@@ -529,6 +584,11 @@ func (k *KDC) handleTGS(ctx context.Context, req *krb.KDCReq, now time.Time) []b
 	}
 	if code := admit(ctx, tgtXUID); code != 0 {
 		return k.fail(code, now, cname)
+	}
+	if tgtXUID != 0 && tgtDevice != 0 && !machineOnly {
+		if code := k.admitDevice(ctx, tgtDevice); code != 0 {
+			return k.fail(code, now, cname)
+		}
 	}
 	principal := struct{ XUID uint64 }{tgtXUID}
 

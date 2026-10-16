@@ -276,3 +276,50 @@ func TestKDCRequiresDeviceStore(t *testing.T) {
 		t.Fatal("nil device store accepted")
 	}
 }
+
+// The order observed from a real console (Berth, 2026-10-16): the user signs in
+// alone first, then the machine account signs in with the user's TGT as
+// compound identity (cname SN.<serial>, krbtgt XBOX.COM ticket inside). The
+// resulting TGT carries the device and the user, and works at the TGS for the user.
+func TestRealConsoleOrderMachineASWithUserCompound(t *testing.T) {
+	e := newEnv(t)
+	e.provisionDevice(xbaccountapi.StatusActive, true)
+	blob := e.macsAccount(1)
+	var accountKey xbcrypto.Key
+	copy(accountKey[:], blob[68:])
+	machineName := &krb.PrincipalName{Type: krb.NameTypeEnterprise, Parts: []string{"SN." + serial + "@xbox.com"}}
+
+	userTGT := e.login()
+	withUser := func(r *krb.KDCReq) {
+		r.CName = machineName
+		r.PAData = append(r.PAData, krb.PAData{Type: krb.PACompoundIdentity, Value: wrapSeq(userTGT.ticket.Marshal())})
+	}
+	compound := xbcrypto.CompoundKey(accountKey, userTGT.session)
+	e.clock.Advance(time.Second)
+	reply := e.handle(e.asReq(compound, e.clock.Now(), 9, withUser))
+	rep, err := krb.ParseKDCRep(reply, krb.MsgASRep)
+	if err != nil {
+		t.Fatalf("machine AS with user compound failed: %x", reply)
+	}
+	plain, err := krb.Open(compound, krb.UsageKDCRepPart, rep.Enc)
+	if err != nil {
+		t.Fatal("reply must be sealed with the compound key")
+	}
+	part, _ := krb.ParseEncKDCRepPart(plain, krb.MsgASRep)
+	session, _ := krb.ToKey(part.Key.Value)
+
+	// The TGT works at the TGS and names the user's XUID in the gateway ticket.
+	e.clock.Advance(time.Second)
+	treply := e.handle(e.tgsReq(tgt{ticket: rep.Ticket, session: session}, tgsOpts{cname: machineName, ids: []uint32{6}}))
+	if trep, err := krb.ParseKDCRep(treply, krb.MsgTGSRep); err != nil || trep.Ticket.SName.Parts[0] != "xbox" {
+		t.Fatalf("TGS for machine+user TGT failed: %x", treply)
+	}
+
+	// Negative: wrong compound key, the device ticket instead of the user's,
+	// and a revoked device.
+	e.clock.Advance(time.Second)
+	e.mustErr(e.handle(e.asReq(accountKey, e.clock.Now(), 10, withUser)), krb.ErrPreauthFailed)
+	e.provisionDevice(xbaccountapi.StatusRevoked, true)
+	e.clock.Advance(time.Second)
+	e.mustErr(e.handle(e.tgsReq(tgt{ticket: rep.Ticket, session: session}, tgsOpts{cname: machineName, ids: []uint32{6}})), krb.ErrClientRevoked)
+}
