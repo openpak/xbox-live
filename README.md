@@ -1,3 +1,21 @@
+# OpenPak original Xbox services
+
+Fork of [Xombie](https://github.com/XombieOnline/xombie), AGPL-3.0.
+This is an evaluation base, not a deployed OpenPak service stack.
+
+Xbox services must have separate runtime images and independent deployments.
+The Xbox account adapter talks to existing account core. Berth and physical
+Xbox consoles use the same native endpoints. Do not deploy the inherited
+omnibus Dockerfile or example compose setup to production.
+
+See [the implementation plan](docs/openpak-plan.md) and
+[provenance](docs/provenance.md).
+
+The inherited README follows as historical context; its host DNS modification
+instructions are not OpenPak setup instructions.
+
+---
+
 Xombie
 ======
 
