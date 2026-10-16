@@ -209,7 +209,7 @@ func (s *Server) handleInit(pkt []byte, peer netip.AddrPort) {
 	}
 	keys := sgwire.DeriveKeys(id.SessionKey, secret, init.Nonce, gwNonce)
 
-	sess := &Session{srv: s, peer: peer, keys: keys, initKey: replayKey, lastSeen: now,
+	sess := &Session{srv: s, peer: peer, sendSPI: sgwire.SPIFromU32(init.SPI), keys: keys, initKey: replayKey, lastSeen: now,
 		conns: map[tcpKey]*tcpConn{}, services: map[uint16]uint32{}, sendSeq: 1,
 		bucket:   bucket{tokens: s.cfg.PacketBurst, last: now},
 		identity: ConnIdentity{Principal: principal, XUID: id.XUID, TitleID: id.TitleID, Generation: s.gen.Add(1)}}

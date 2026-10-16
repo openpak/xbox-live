@@ -294,6 +294,11 @@ func TestHandshakePulseAndNoKeyReuse(t *testing.T) {
 	if p == nil || p.Opcode != sgwire.OpControl {
 		t.Fatal("no pulse reply")
 	}
+	// Packets to the console carry the console's own (init) SPI, not the
+	// gateway-chosen one the console puts on packets it sends.
+	if p.SPI != sgwire.SPIFromU32(0x59a300) || p.SPI == a.spi {
+		t.Fatalf("reply SPI %v, want the init SPI", p.SPI)
+	}
 	chunks, _ := sgwire.ParseChunks(p.Payload)
 	if len(chunks) != 1 || chunks[0].Tag != sgwire.TagSgPulse || binary.LittleEndian.Uint32(chunks[0].Data) != 7 {
 		t.Fatal("wrong pulse reply")

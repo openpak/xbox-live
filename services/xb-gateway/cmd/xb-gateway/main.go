@@ -82,6 +82,15 @@ func run(log *slog.Logger) error {
 		backends[uint32(id)] = b
 	}
 
+	// Debug only: accept (and discard) connections for these services so the
+	// console's first bytes reach the capture. Never answers; off by default.
+	for _, item := range strings.Fields(strings.ReplaceAll(os.Getenv("XBGW_DEBUG_SINK_SERVICES"), ",", " ")) {
+		if id, err := strconv.ParseUint(item, 10, 32); err == nil && backends[uint32(id)] == nil {
+			backends[uint32(id)] = debugSink{}
+			log.Warn("DEBUG SINK backend enabled (accepts and discards)", "service", id)
+		}
+	}
+
 	// Ticket verification uses the SG keyring shared with xb-auth (same file
 	// format and rotation ids). Without it the gateway is not ready and rejects every init.
 	var verifier gateway.TicketVerifier

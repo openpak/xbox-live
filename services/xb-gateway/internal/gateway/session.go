@@ -49,7 +49,8 @@ type tcpConn struct {
 // only; feature state belongs to the backends.
 type Session struct {
 	srv      *Server
-	spi      sgwire.SPI
+	spi      sgwire.SPI // gateway-chosen: carried by packets from the console
+	sendSPI  sgwire.SPI // console-chosen (init SPI): carried by packets to the console
 	peer     netip.AddrPort
 	keys     sgwire.ConnectionKeys
 	identity ConnIdentity
@@ -91,11 +92,12 @@ func (s *Session) send(op sgwire.Opcode, footer, payload []byte) {
 		go s.srv.closeSession(s, "sequence space exhausted", false)
 		return
 	}
-	pkt, err := sgwire.Seal(s.keys.SGToClient, op, s.spi, s.sendSeq, payload, footer)
+	pkt, err := sgwire.Seal(s.keys.SGToClient, op, s.sendSPI, s.sendSeq, payload, footer)
 	s.sendSeq++
 	if err != nil {
 		return
 	}
+	s.srv.capture.record(true, byte(op)|0x40, s.spi.U32(), footer) // 0x40: footer (TCP header)
 	s.srv.capture.record(true, byte(op), s.spi.U32(), payload)
 	s.srv.conn.WriteToUDPAddrPort(pkt, s.peer)
 }
@@ -122,6 +124,7 @@ func (s *Session) handle(buf []byte, now time.Time) {
 		return
 	}
 	s.lastSeen = now
+	s.srv.capture.record(false, byte(pkt.Opcode)|0x40, s.spi.U32(), pkt.Footer)
 	s.srv.capture.record(false, byte(pkt.Opcode), s.spi.U32(), pkt.Payload)
 	if pkt.Opcode == sgwire.OpControl {
 		s.handleControl(pkt.Payload, now)
@@ -319,6 +322,7 @@ func (s *Session) openTCP(hdr sgwire.TCPHeader, key tcpKey, options []byte, data
 	}
 	backend := s.srv.backends[id]
 	if backend == nil {
+		s.srv.log.Info("service open refused: no backend", "service", id, "port", hdr.Dst)
 		s.srv.stats.unavailable.Add(1)
 		s.sendReset(hdr, dataLen)
 		return
