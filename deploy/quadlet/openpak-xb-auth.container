@@ -1,0 +1,29 @@
+# MAIN host. Native auth/TGS (UDP/TCP 88 equivalents are decided by xb-auth; see its
+# README). Not buildable until services/xb-auth/cmd/xb-auth exists. The ticket reply
+# advertises the SECONDARY PUBLIC gateway address, never a ZeroTier address.
+[Unit]
+Description=OpenPak Xbox auth/TGS
+After=openpak-xb-account.service
+Wants=openpak-xb-account.service
+
+[Container]
+ContainerName=openpak-xb-auth
+Image=ghcr.io/openpak/xb-auth@sha256:REPLACE_WITH_DIGEST
+Network=openpak.network
+# REPLACE_AUTH_PUBLISH: the native auth listener port(s) once xb-auth defines them and the
+# audit shows they are free. Main already has Demonware on UDP 3074; auth does not use it.
+ReadOnly=true
+DropCapability=ALL
+NoNewPrivileges=true
+User=10001:10001
+EnvironmentFile=%h/openpak/deploy/xbox/xb-auth.env
+Volume=%h/openpak/deploy/xbox/pki/auth:/run/xb:ro
+# Ticket validation key (shared with the gateway) lives here; never in the env file.
+Volume=%h/openpak/deploy/xbox/ticket-keys:/run/xb-ticket:ro
+
+[Service]
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=default.target

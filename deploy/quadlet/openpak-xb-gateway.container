@@ -1,0 +1,34 @@
+# SECONDARY host (draughts-server). Install to ~/.config/containers/systemd/ and
+# `systemctl --user daemon-reload && systemctl --user start openpak-xb-gateway`.
+# Host networking keeps the console's public source address on every datagram and
+# lets the socket bind the local interface while the public IP is NAT-ed.
+# DO NOT start before the checklist in deploy/README.md reaches step 4.
+[Unit]
+Description=OpenPak Xbox Live gateway (native SG, UDP 3074)
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+ContainerName=openpak-xb-gateway
+# Pin an immutable digest; do not use :latest and no AutoUpdate (rollback needs a known image).
+Image=ghcr.io/openpak/xb-gateway@sha256:REPLACE_WITH_DIGEST
+Network=host
+ReadOnly=true
+DropCapability=ALL
+NoNewPrivileges=true
+User=10001:10001
+EnvironmentFile=%h/openpak/deploy/xbox/xb-gateway.env
+# mTLS client identity + CA (read-only, owner-local, never baked into an image).
+Volume=%h/openpak/deploy/xbox/pki/gateway:/run/xb:ro
+HealthCmd=/xb-gateway healthcheck
+HealthInterval=30s
+HealthRetries=3
+HealthStartPeriod=10s
+
+[Service]
+Restart=always
+RestartSec=3
+TimeoutStopSec=15
+
+[Install]
+WantedBy=default.target

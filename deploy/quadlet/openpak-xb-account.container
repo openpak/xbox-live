@@ -1,0 +1,26 @@
+# MAIN host (quilted-waffle). Private API only: published on the ZeroTier address,
+# never on a public interface. Pick the port after the main-host listener audit.
+[Unit]
+Description=OpenPak Xbox account adapter (private API)
+After=openpak-account.service
+
+[Container]
+ContainerName=openpak-xb-account
+Image=ghcr.io/openpak/xb-account@sha256:REPLACE_WITH_DIGEST
+Network=openpak.network
+# 10.212.63.196 = main's ZeroTier address. REPLACE_PORT after the audit.
+PublishPort=10.212.63.196:REPLACE_PORT:REPLACE_PORT/tcp
+ReadOnly=true
+DropCapability=ALL
+NoNewPrivileges=true
+User=10001:10001
+EnvironmentFile=%h/openpak/deploy/xbox/xb-account.env
+Volume=%h/openpak/deploy/xbox/pki/account:/run/xb:ro
+Volume=openpak-xb-account:/var/lib/xb-account:U
+
+[Service]
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=default.target

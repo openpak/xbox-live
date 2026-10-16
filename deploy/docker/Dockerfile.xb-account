@@ -1,0 +1,19 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Minimal xb-account image. Build context is servers/xbox-live (the Go module root):
+#   podman build -f deploy/docker/Dockerfile.xb-account -t ghcr.io/openpak/xb-account:<tag> .
+# Pure Go (CGO off), static binary, no shell, non-root. Pin the base by digest in CI.
+ARG GO_IMAGE=docker.io/library/golang:1.26-bookworm
+FROM ${GO_IMAGE} AS build
+ARG TARGETOS TARGETARCH
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY internal ./internal
+COPY services/xb-account ./services/xb-account
+RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} \
+    go build -trimpath -ldflags="-s -w" -o /out/xb-account ./services/xb-account/cmd/xb-account
+
+FROM scratch
+COPY --from=build /out/xb-account /xb-account
+USER 10001:10001
+ENTRYPOINT ["/xb-account"]
