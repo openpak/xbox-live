@@ -13,8 +13,8 @@ DropCapability=ALL
 NoNewPrivileges=true
 User=10001:10001
 EnvironmentFile=%h/openpak/deploy/xbox/xb-dns.env
-HealthCmd=/xb-dns healthcheck
-HealthInterval=30s
+# no shell in the scratch image, so podman cannot run a HealthCmd; use /healthz on loopback
+HealthCmd=none
 
 [Service]
 Restart=always

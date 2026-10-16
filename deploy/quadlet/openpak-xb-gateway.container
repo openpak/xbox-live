@@ -20,10 +20,8 @@ User=10001:10001
 EnvironmentFile=%h/openpak/deploy/xbox/xb-gateway.env
 # mTLS client identity + CA (read-only, owner-local, never baked into an image).
 Volume=%h/openpak/deploy/xbox/pki/gateway:/run/xb:ro
-HealthCmd=/xb-gateway healthcheck
-HealthInterval=30s
-HealthRetries=3
-HealthStartPeriod=10s
+# no shell in the scratch image, so podman cannot run a HealthCmd; use /healthz on loopback
+HealthCmd=none
 
 [Service]
 Restart=always
