@@ -613,6 +613,13 @@ func (k *KDC) handleTGS(ctx context.Context, req *krb.KDCReq, now time.Time) []b
 			return k.fail(krb.ErrPolicy, now, cname)
 		}
 		address = k.serviceAddress(sr, principal.XUID)
+		// Shape only: which services were asked for and how each user slot and
+		// service answered (HRESULTs and ports are public protocol values).
+		var res []string
+		for i := uint32(0); i < sr.NumServices && i < uint32(len(address.Results)); i++ {
+			res = append(res, fmt.Sprintf("%d:%x/%d", sr.ServiceIDs[i], uint32(address.Results[i].HR), address.Results[i].Port))
+		}
+		log.Printf("xb-auth tgs service request: tgt_user=%t tgt_device=%t slots=%x/%x/%x/%x services=%v sname=%v", tgtXUID != 0 && !machineOnly, tgtDevice != 0, address.HRUser[0], address.HRUser[1], address.HRUser[2], address.HRUser[3], res, req.SName.Parts)
 		encAddr, err := krb.Seal(nonceKey, krb.UsageServiceAddress, nil, address.Marshal())
 		if err != nil {
 			return k.fail(krb.ErrSvcUnavailable, now, cname)
