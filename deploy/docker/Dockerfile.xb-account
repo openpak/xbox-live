@@ -3,7 +3,7 @@
 #   podman build -f deploy/docker/Dockerfile.xb-account -t ghcr.io/openpak/xb-account:<tag> .
 # Pure Go (CGO off), static binary, no shell, non-root. Pin the base by digest in CI.
 ARG GO_IMAGE=docker.io/library/golang:1.26-bookworm
-FROM ${GO_IMAGE} AS build
+FROM --platform=$BUILDPLATFORM ${GO_IMAGE} AS build
 ARG TARGETOS TARGETARCH
 WORKDIR /src
 COPY go.mod go.sum ./

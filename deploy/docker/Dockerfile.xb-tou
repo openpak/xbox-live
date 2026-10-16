@@ -1,0 +1,19 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Minimal xb-tou image . Build context is servers/xbox-live:
+#   podman build -f deploy/docker/Dockerfile.xb-tou -t ghcr.io/openpak/xb-tou:<tag> .
+# Pure Go (CGO off), static binary, no shell, non-root. Pin the base by digest in CI.
+ARG GO_IMAGE=docker.io/library/golang:1.26-bookworm
+FROM --platform=$BUILDPLATFORM ${GO_IMAGE} AS build
+ARG TARGETOS TARGETARCH
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY internal ./internal
+COPY services/xb-tou ./services/xb-tou
+RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} \
+    go build -trimpath -ldflags="-s -w" -o /out/xb-tou ./services/xb-tou/cmd/xb-tou
+
+FROM scratch
+COPY --from=build /out/xb-tou /xb-tou
+USER 10001:10001
+ENTRYPOINT ["/xb-tou"]

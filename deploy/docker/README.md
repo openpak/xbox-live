@@ -6,7 +6,8 @@
 | xb-account | Dockerfile.xb-account | builds from `services/xb-account` (the service's own Dockerfile is equivalent) |
 | xb-auth | Dockerfile.xb-auth | builds once `services/xb-auth/cmd/xb-auth` exists |
 | xb-enroll | Dockerfile.xb-enroll | builds from `services/xb-enroll`; template only, not deployed (public exposure is a decision) |
-| xb-social | none | planned; no Dockerfile or unit is shipped so nothing can be mistaken for a working endpoint |
+| xb-tou | Dockerfile.xb-tou | builds from `services/xb-tou` |
+| xb-social | Dockerfile.xb-social | builds from `services/xb-social`; published by CI, not deployed |
 
 Later feature services (presence, matchmaking, stats, etc.) follow the same
 pattern: one image per service, no shared state in the gateway.
