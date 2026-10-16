@@ -20,8 +20,6 @@ type settings struct {
 	accountCA   string
 	tlsCertFile string
 	tlsKeyFile  string
-
-	deviceKeysFile string // optional: XB_DEVICE_KEYS_FILE
 }
 
 func duration(get func(string) string, name string, def time.Duration) (time.Duration, error) {
@@ -74,7 +72,6 @@ func loadSettings(get func(string) string) (*settings, error) {
 			return nil, fmt.Errorf("XB_REPLAY_MAX must be a positive integer")
 		}
 	}
-	s.deviceKeysFile = get("XB_DEVICE_KEYS_FILE")
 	for _, k := range []struct {
 		env  string
 		size int

@@ -26,10 +26,12 @@ func request(method, path, body, uri string, verified bool) *http.Request {
 }
 
 func TestRoutesAuthorizePerCaller(t *testing.T) {
-	h := Handler(nil, nil, nil) // authorization must reject before any backend is touched
+	h := Handler(nil, nil, nil, nil) // authorization must reject before any backend is touched
 	for _, tc := range []tcase{
 		{"GET", "/internal/v1/users/0009000000000001", "", "spiffe://openpak/xb-provisioner", true, 403},
 		{"GET", "/internal/v1/devices/00aa00bb00cc00dd", "", "spiffe://openpak/x360-auth", true, 403},
+		{"GET", "/internal/v1/devices/0000001cbe991a14/key", "", "spiffe://openpak/xb-gateway", true, 403}, // keys: xb-auth only
+		{"GET", "/internal/v1/devices/0000001cbe991a14/key", "", "spiffe://openpak/xb-provisioner", true, 403},
 		{"GET", "/internal/v1/revocations?after=0&limit=1", "", "spiffe://openpak/xb-social", true, 403},
 		{"GET", "/internal/v1/revocations?after=0&limit=1", "", "spiffe://openpak/xb-gateway", false, 403}, // unverified chain
 		{"GET", "/internal/v1/users/0009000000000001", "", "", false, 403},                                 // no TLS at all
@@ -53,7 +55,7 @@ type tcase struct {
 }
 
 func TestMalformedProvisioningBodies(t *testing.T) {
-	h := Handler(nil, nil, nil)
+	h := Handler(nil, nil, nil, nil)
 	for _, body := range []string{"", "not json", `{"unknown":1}`, `{"core_account_id":"a"} {}`} {
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, request("POST", "/internal/v1/provisions", body, Provisioner, true))

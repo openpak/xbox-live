@@ -50,8 +50,10 @@ func Only(h http.Handler, allowed ...string) http.Handler {
 }
 
 // Handler mounts the contract (auth, gateway) and provisioning routes.
-func Handler(res xbaccountapi.Resolver, rev xbaccountapi.Revocations, prov *provision.Provisioner) http.Handler {
+func Handler(res xbaccountapi.Resolver, rev xbaccountapi.Revocations, keys xbaccountapi.DeviceKeys, prov *provision.Provisioner) http.Handler {
 	mux := http.NewServeMux()
+	// Device proof material goes to xb-auth only, never the gateway.
+	mux.Handle("GET /internal/v1/devices/{id}/key", Only(xbaccountapi.KeyHandler(keys), Auth))
 	mux.Handle("/internal/v1/users/", Only(xbaccountapi.Handler(res, rev), Auth, Gateway))
 	mux.Handle("/internal/v1/gamertags/", Only(xbaccountapi.Handler(res, rev), Auth, Gateway))
 	mux.Handle("/internal/v1/devices/", Only(xbaccountapi.Handler(res, rev), Auth, Gateway))

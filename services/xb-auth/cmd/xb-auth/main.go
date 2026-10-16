@@ -63,13 +63,8 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	devices := devicekeys.None
-	if s.deviceKeysFile != "" {
-		if devices, err = devicekeys.Load(s.deviceKeysFile); err != nil {
-			return err
-		}
-	}
-	k, err := kdc.New(s.kdc, &xbaccountapi.Client{Base: s.accountURL, HTTP: hc}, devices)
+	account := &xbaccountapi.Client{Base: s.accountURL, HTTP: hc}
+	k, err := kdc.New(s.kdc, account, devicekeys.Remote{Keys: account})
 	if err != nil {
 		return err
 	}

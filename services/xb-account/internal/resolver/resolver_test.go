@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"openpak/xb-live/internal/xbaccountapi"
+	"openpak/xb-live/internal/xbcrypto"
 	"openpak/xb-live/services/xb-account/internal/core"
 	pb "openpak/xb-live/services/xb-account/internal/corepb"
 	"openpak/xb-live/services/xb-account/internal/coretest"
@@ -22,7 +23,7 @@ import (
 )
 
 const (
-	machine   = "00aa00bb00cc00dd"
+	machine   = "0000001cbe991a14"
 	challenge = "device-nonce-0123456789"
 )
 
@@ -48,7 +49,7 @@ func newWorld(t *testing.T) *world {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r, err := p.Finalize(context.Background(), provision.FinalizeRequest{Token: tok, MachineID: machine, Challenge: challenge, Gamertag: "Player One", Proof: bytes.Repeat([]byte{9}, 32)})
+	r, err := p.Finalize(context.Background(), provision.FinalizeRequest{Token: tok, MachineID: machine, Challenge: challenge, Gamertag: "Player One", Proof: bytes.Repeat([]byte{9}, 16)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,7 +82,7 @@ func TestResolveActive(t *testing.T) {
 	if _, err := w.res.ResolveUser(ctx, machine); !errors.Is(err, xbaccountapi.ErrNotFound) {
 		t.Fatalf("machine as user: %v", err)
 	}
-	if _, err := w.res.ResolveDevice(ctx, w.xuid); !errors.Is(err, xbaccountapi.ErrNotFound) {
+	if _, err := w.res.ResolveDevice(ctx, w.xuid); !errors.Is(err, xbaccountapi.ErrInvalid) {
 		t.Fatalf("xuid as device: %v", err)
 	}
 	if _, err := w.res.ResolveUser(ctx, "nope"); !errors.Is(err, xbaccountapi.ErrInvalid) {
@@ -234,7 +235,7 @@ func TestDeletionAndCredentialRevocation(t *testing.T) {
 	if denial(w.device()) != xbaccountapi.StatusRevoked {
 		t.Fatal("device not revoked")
 	}
-	if ok, _ := w.db.VerifyDeviceProof(ctx, machine, bytes.Repeat([]byte{9}, 32)); ok {
+	if ok, _ := w.db.VerifyDeviceProof(ctx, machine, bytes.Repeat([]byte{9}, 16)); ok {
 		t.Fatal("revoked device proof still verifies")
 	}
 	if err := w.user(); err != nil {
@@ -336,4 +337,24 @@ func TestConcurrentResolveAndProcess(t *testing.T) {
 		w.proc.ProcessOnce(context.Background())
 	}()
 	wg.Wait()
+}
+
+func TestDeviceKeyOnlyForAdmittedDevices(t *testing.T) {
+	w := newWorld(t)
+	ctx := context.Background()
+	k, err := w.res.DeviceKey(ctx, machine)
+	if err != nil || !bytes.Equal(k[:], bytes.Repeat([]byte{9}, 16)) {
+		t.Fatalf("key %x %v", k, err)
+	}
+	if _, err := w.res.DeviceKey(ctx, "0000000000000042"); !errors.Is(err, xbaccountapi.ErrNotFound) {
+		t.Fatalf("unknown device: %v", err)
+	}
+	if _, err := w.res.DeviceKey(ctx, w.xuid); !errors.Is(err, xbaccountapi.ErrInvalid) {
+		t.Fatalf("xuid as machine id: %v", err)
+	}
+	w.core.Emit("link_unlinked", "acct1", "xbox", w.xuid)
+	process(t, w)
+	if k, err := w.res.DeviceKey(ctx, machine); !errors.Is(err, xbaccountapi.ErrDenied) || k != (xbcrypto.Key{}) {
+		t.Fatalf("revoked device key released: %x %v", k, err)
+	}
 }

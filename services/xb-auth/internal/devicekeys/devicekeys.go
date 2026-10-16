@@ -1,14 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Package devicekeys is a file-backed kdc.DeviceKeys: a secret JSON file
-// {"<machine id>":"<32 hex machine key>"}. It is an interim store until
-// xb-account owns device proof material. An absent file means no device has
-// proof material, so MACS answers "principal unknown" for everyone.
+// Package devicekeys adapts device proof material to kdc.DeviceKeys.
+// Remote (production) asks xb-account over mTLS, which owns the keys and
+// releases one only for a device that is currently admitted. Store is a
+// TEST-ONLY file-backed variant: a secret JSON file {"<machine id>":"<32 hex
+// machine key>"}; cmd/xb-auth does not use it.
 package devicekeys
 
 import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 
@@ -59,4 +61,20 @@ func (s Store) MachineKey(_ context.Context, id string) (xbcrypto.Key, error) {
 		return k, nil
 	}
 	return xbcrypto.Key{}, kdc.ErrNoDeviceKey
+}
+
+// Remote is the production kdc.DeviceKeys: it maps xb-account's answers onto
+// the KDC's: not found, denied and invalid all mean "no proof material"
+// (MACS: principal unknown); any other failure is a service error.
+type Remote struct{ Keys xbaccountapi.DeviceKeys }
+
+func (r Remote) MachineKey(ctx context.Context, id string) (xbcrypto.Key, error) {
+	k, err := r.Keys.DeviceKey(ctx, id)
+	switch {
+	case err == nil:
+		return k, nil
+	case errors.Is(err, xbaccountapi.ErrNotFound), errors.Is(err, xbaccountapi.ErrDenied), errors.Is(err, xbaccountapi.ErrInvalid):
+		return xbcrypto.Key{}, kdc.ErrNoDeviceKey
+	}
+	return xbcrypto.Key{}, err
 }

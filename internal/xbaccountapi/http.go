@@ -4,6 +4,7 @@ package xbaccountapi
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -11,6 +12,8 @@ import (
 	"net/url"
 	"strconv"
 	"time"
+
+	"openpak/xb-live/internal/xbcrypto"
 )
 
 const (
@@ -20,6 +23,29 @@ const (
 
 type deniedBody struct {
 	Principal Principal `json:"principal"`
+}
+
+// KeyHandler serves GET /internal/v1/devices/{id}/key. Mount it only behind a
+// check that the peer is xb-auth. Responses are never cacheable.
+func KeyHandler(k DeviceKeys) http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /internal/v1/devices/{id}/key", func(w http.ResponseWriter, req *http.Request) {
+		key, err := k.DeviceKey(req.Context(), req.PathValue("id"))
+		var denied *DeniedError
+		switch {
+		case err == nil:
+			writeJSON(w, 200, map[string]string{"key": hex.EncodeToString(key[:])})
+		case errors.As(err, &denied):
+			writeJSON(w, 403, deniedBody{denied.Principal})
+		case errors.Is(err, ErrInvalid):
+			http.Error(w, "invalid identifier", 400)
+		case errors.Is(err, ErrNotFound):
+			http.Error(w, "not found", 404)
+		default:
+			http.Error(w, "unavailable", 503)
+		}
+	})
+	return mux
 }
 
 // Handler serves the contract. Authorization of callers (mTLS peer identity)
@@ -100,6 +126,45 @@ type Client struct {
 
 var _ Resolver = (*Client)(nil)
 var _ Revocations = (*Client)(nil)
+var _ DeviceKeys = (*Client)(nil)
+
+// DeviceKey fetches a device's machine key from xb-account.
+func (c *Client) DeviceKey(ctx context.Context, id string) (xbcrypto.Key, error) {
+	var zero xbcrypto.Key
+	if !ValidMachineID(id) {
+		return zero, ErrInvalid
+	}
+	code, body, err := c.get(ctx, "/internal/v1/devices/"+url.PathEscape(id)+"/key", nil)
+	if err != nil {
+		return zero, err
+	}
+	switch code {
+	case 200:
+		var r struct {
+			Key string `json:"key"`
+		}
+		if json.Unmarshal(body, &r) != nil {
+			return zero, ErrUnavailable
+		}
+		raw, derr := hex.DecodeString(r.Key)
+		if derr != nil || len(raw) != len(zero) {
+			return zero, ErrUnavailable
+		}
+		copy(zero[:], raw)
+		return zero, nil
+	case 403:
+		var d deniedBody
+		if json.Unmarshal(body, &d) != nil || !d.Principal.Status.Valid() || d.Principal.Status == StatusActive {
+			return zero, ErrUnavailable
+		}
+		return zero, &DeniedError{d.Principal}
+	case 404:
+		return zero, ErrNotFound
+	case 400:
+		return zero, ErrInvalid
+	}
+	return zero, ErrUnavailable
+}
 
 func (c *Client) get(ctx context.Context, path string, out any) (int, []byte, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", c.Base+path, nil)
@@ -119,7 +184,7 @@ func (c *Client) get(ctx context.Context, path string, out any) (int, []byte, er
 }
 
 func (c *Client) resolve(ctx context.Context, kind Kind, seg, id string) (Principal, error) {
-	if seg == "gamertags" && !ValidGamertag(id) || seg != "gamertags" && !ValidID(id) {
+	if seg == "gamertags" && !ValidGamertag(id) || seg == "users" && !ValidID(id) || seg == "devices" && !ValidMachineID(id) {
 		return Principal{}, ErrInvalid
 	}
 	code, body, err := c.get(ctx, "/internal/v1/"+seg+"/"+url.PathEscape(id), nil)

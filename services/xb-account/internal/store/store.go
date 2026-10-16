@@ -15,7 +15,10 @@ package store
 
 import (
 	"context"
+	"crypto/aes"
+	"crypto/cipher"
 	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
 	"errors"
@@ -50,12 +53,12 @@ CREATE TABLE IF NOT EXISTS gamertag_aliases(
  alias_lower TEXT PRIMARY KEY, xuid TEXT NOT NULL REFERENCES users(xuid), created INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS devices(
  machine_id TEXT PRIMARY KEY, core_account_id TEXT NOT NULL, status TEXT NOT NULL,
- proof_mac BLOB NOT NULL, created INTEGER NOT NULL, updated INTEGER NOT NULL);
+ proof_mac BLOB NOT NULL, proof_sealed BLOB NOT NULL DEFAULT x'', created INTEGER NOT NULL, updated INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS devices_account ON devices(core_account_id);
 CREATE TABLE IF NOT EXISTS provisions(
  id TEXT PRIMARY KEY, core_account_id TEXT NOT NULL, machine_id TEXT NOT NULL, challenge_hash BLOB NOT NULL,
  expires INTEGER NOT NULL, state TEXT NOT NULL, xuid TEXT NOT NULL DEFAULT '', link_id TEXT NOT NULL DEFAULT '',
- gamertag TEXT NOT NULL DEFAULT '', proof_mac BLOB, fail_reason TEXT NOT NULL DEFAULT '',
+ gamertag TEXT NOT NULL DEFAULT '', proof_mac BLOB, proof_sealed BLOB, fail_reason TEXT NOT NULL DEFAULT '',
  created INTEGER NOT NULL, updated INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS cursors(name TEXT PRIMARY KEY, version INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS processed_events(event_id TEXT PRIMARY KEY, version INTEGER NOT NULL);
@@ -98,6 +101,49 @@ func (s *Store) ProofMAC(machineID string, proof []byte) []byte {
 	m.Write([]byte("xb-device-proof\x00" + machineID + "\x00"))
 	m.Write(proof)
 	return m.Sum(nil)
+}
+
+func (s *Store) sealKey() cipher.AEAD {
+	m := hmac.New(sha256.New, s.pepper)
+	m.Write([]byte("xb-device-key-seal"))
+	b, _ := aes.NewCipher(m.Sum(nil))
+	g, _ := cipher.NewGCM(b)
+	return g
+}
+
+// SealProof encrypts the device proof (the 16-byte machine key) for storage,
+// bound to machineID. Unlike ProofMAC it is recoverable, because xb-auth needs
+// the key itself to verify MACS requests.
+func (s *Store) SealProof(machineID string, proof []byte) ([]byte, error) {
+	g := s.sealKey()
+	nonce := make([]byte, g.NonceSize())
+	if _, err := rand.Read(nonce); err != nil {
+		return nil, err
+	}
+	return g.Seal(nonce, nonce, proof, []byte(machineID)), nil
+}
+
+// DeviceKey returns the machine key of an ACTIVE device. Admission beyond the
+// local status (core link, account) is the resolver's job.
+func (s *Store) DeviceKey(ctx context.Context, machineID string) ([]byte, error) {
+	var sealed []byte
+	var st string
+	err := s.db.QueryRowContext(ctx, `SELECT proof_sealed,status FROM devices WHERE machine_id=?`, machineID).Scan(&sealed, &st)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	g := s.sealKey()
+	if xbaccountapi.Status(st) != xbaccountapi.StatusActive || len(sealed) <= g.NonceSize() {
+		return nil, ErrNotFound
+	}
+	key, err := g.Open(nil, sealed[:g.NonceSize()], sealed[g.NonceSize():], []byte(machineID))
+	if err != nil || len(key) != 16 {
+		return nil, ErrNotFound
+	}
+	return key, nil
 }
 
 // tx runs f in a serialised write transaction.
@@ -205,7 +251,7 @@ type Provision struct {
 	Expires                      time.Time
 	State                        ProvState
 	XUID, LinkID, Gamertag       string
-	ProofMAC                     []byte
+	ProofMAC, ProofSealed        []byte
 	FailReason                   string
 }
 
@@ -226,7 +272,7 @@ func scanProv(row interface{ Scan(...any) error }) (Provision, error) {
 	var ch []byte
 	var exp int64
 	var st string
-	err := row.Scan(&p.ID, &p.CoreAccountID, &p.MachineID, &ch, &exp, &st, &p.XUID, &p.LinkID, &p.Gamertag, &p.ProofMAC, &p.FailReason)
+	err := row.Scan(&p.ID, &p.CoreAccountID, &p.MachineID, &ch, &exp, &st, &p.XUID, &p.LinkID, &p.Gamertag, &p.ProofMAC, &p.ProofSealed, &p.FailReason)
 	if errors.Is(err, sql.ErrNoRows) {
 		return p, ErrNotFound
 	}
@@ -236,7 +282,7 @@ func scanProv(row interface{ Scan(...any) error }) (Provision, error) {
 	return p, err
 }
 
-const provCols = `id,core_account_id,machine_id,challenge_hash,expires,state,xuid,link_id,gamertag,proof_mac,fail_reason`
+const provCols = `id,core_account_id,machine_id,challenge_hash,expires,state,xuid,link_id,gamertag,proof_mac,proof_sealed,fail_reason`
 
 func (s *Store) GetProvision(ctx context.Context, id string) (Provision, error) {
 	return scanProv(s.db.QueryRowContext(ctx, `SELECT `+provCols+` FROM provisions WHERE id=?`, id))
@@ -263,8 +309,8 @@ func (s *Store) StaleProvisions(ctx context.Context) ([]Provision, error) {
 // SetProvision updates the mutable resume fields.
 func (s *Store) SetProvision(ctx context.Context, p Provision) error {
 	return s.tx(ctx, func(t *sql.Tx) error {
-		_, err := t.ExecContext(ctx, `UPDATE provisions SET state=?,xuid=?,link_id=?,gamertag=?,proof_mac=?,fail_reason=?,updated=? WHERE id=?`,
-			p.State, p.XUID, p.LinkID, p.Gamertag, p.ProofMAC, p.FailReason, s.unix(), p.ID)
+		_, err := t.ExecContext(ctx, `UPDATE provisions SET state=?,xuid=?,link_id=?,gamertag=?,proof_mac=?,proof_sealed=?,fail_reason=?,updated=? WHERE id=?`,
+			p.State, p.XUID, p.LinkID, p.Gamertag, p.ProofMAC, p.ProofSealed, p.FailReason, s.unix(), p.ID)
 		return err
 	})
 }
@@ -286,13 +332,13 @@ func (s *Store) CommitProvision(ctx context.Context, p Provision) error {
 		err := t.QueryRowContext(ctx, `SELECT core_account_id,status FROM devices WHERE machine_id=?`, p.MachineID).Scan(&acct, &st)
 		switch {
 		case errors.Is(err, sql.ErrNoRows):
-			_, err = t.ExecContext(ctx, `INSERT INTO devices(machine_id,core_account_id,status,proof_mac,created,updated) VALUES(?,?,'active',?,?,?)`, p.MachineID, p.CoreAccountID, p.ProofMAC, n, n)
+			_, err = t.ExecContext(ctx, `INSERT INTO devices(machine_id,core_account_id,status,proof_mac,proof_sealed,created,updated) VALUES(?,?,'active',?,?,?,?)`, p.MachineID, p.CoreAccountID, p.ProofMAC, p.ProofSealed, n, n)
 		case err != nil:
 		case xbaccountapi.Status(st) == xbaccountapi.StatusActive && acct != p.CoreAccountID,
 			xbaccountapi.Status(st) == xbaccountapi.StatusBanned:
 			return ErrConflict
 		default: // re-provisioning the same account's device, or reviving a revoked one
-			_, err = t.ExecContext(ctx, `UPDATE devices SET core_account_id=?,status='active',proof_mac=?,updated=? WHERE machine_id=?`, p.CoreAccountID, p.ProofMAC, n, p.MachineID)
+			_, err = t.ExecContext(ctx, `UPDATE devices SET core_account_id=?,status='active',proof_mac=?,proof_sealed=?,updated=? WHERE machine_id=?`, p.CoreAccountID, p.ProofMAC, p.ProofSealed, n, p.MachineID)
 		}
 		if err != nil {
 			return conflict(err)

@@ -102,7 +102,7 @@ func tokenID(token string) string {
 // Begin records an approval and returns the one-time token (shown once; only
 // its hash is stored).
 func (p *Provisioner) Begin(ctx context.Context, r BeginRequest) (token string, expires time.Time, err error) {
-	if r.CoreAccountID == "" || !xbaccountapi.ValidID(r.MachineID) || !validChallenge(r.Challenge) {
+	if r.CoreAccountID == "" || !xbaccountapi.ValidMachineID(r.MachineID) || !validChallenge(r.Challenge) {
 		return "", time.Time{}, ErrInvalid
 	}
 	acct, err := p.Core.GetAccount(ctx, r.CoreAccountID)
@@ -145,7 +145,7 @@ type FinalizeRequest struct {
 	MachineID string
 	Challenge string
 	Gamertag  string
-	Proof     []byte // device proof secret, 16..128 bytes; stored only as a keyed MAC
+	Proof     []byte // the console's 16-byte machine key (xbcrypto.MachineKey); stored sealed + as a keyed MAC
 }
 
 type Result struct {
@@ -179,8 +179,8 @@ func newXUID() (string, error) {
 
 // Finalize performs or resumes the provisioning transaction.
 func (p *Provisioner) Finalize(ctx context.Context, r FinalizeRequest) (Result, error) {
-	if r.Token == "" || len(r.Token) > 128 || !xbaccountapi.ValidID(r.MachineID) || !validChallenge(r.Challenge) ||
-		!validGamertag(r.Gamertag) || len(r.Proof) < 16 || len(r.Proof) > 128 {
+	if r.Token == "" || len(r.Token) > 128 || !xbaccountapi.ValidMachineID(r.MachineID) || !validChallenge(r.Challenge) ||
+		!validGamertag(r.Gamertag) || len(r.Proof) != 16 {
 		return Result{}, ErrInvalid
 	}
 	id := tokenID(r.Token)
@@ -217,7 +217,11 @@ func (p *Provisioner) Finalize(ctx context.Context, r FinalizeRequest) (Result, 
 		if err != nil {
 			return Result{}, ErrUnavailable
 		}
-		rec.State, rec.XUID, rec.Gamertag, rec.ProofMAC = store.ProvClaimed, xuid, r.Gamertag, mac
+		sealed, err := p.Store.SealProof(rec.MachineID, r.Proof)
+		if err != nil {
+			return Result{}, ErrUnavailable
+		}
+		rec.State, rec.XUID, rec.Gamertag, rec.ProofMAC, rec.ProofSealed = store.ProvClaimed, xuid, r.Gamertag, mac, sealed
 		if err := p.Store.SetProvision(ctx, rec); err != nil {
 			return Result{}, ErrUnavailable
 		}

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"openpak/xb-live/internal/xbcrypto"
 	"sync"
 	"testing"
 	"time"
@@ -14,7 +15,7 @@ import (
 
 const (
 	xuid = "0009000000000001"
-	mach = "00aa00bb00cc00dd"
+	mach = "0000001cbe991a14"
 )
 
 type fake struct {
@@ -25,9 +26,9 @@ type fake struct {
 func (f *fake) ResolveUser(_ context.Context, id string) (Principal, error) {
 	switch id {
 	case xuid:
-		return Principal{KindUser, id, "acct", StatusActive}, nil
+		return Principal{KindUser, id, "acct", StatusActive, ""}, nil
 	case "0009000000000002":
-		return Principal{}, &DeniedError{Principal{KindUser, id, "acct", StatusBanned}}
+		return Principal{}, &DeniedError{Principal{KindUser, id, "acct", StatusBanned, ""}}
 	case "0009000000000003":
 		return Principal{}, ErrNotFound
 	}
@@ -46,9 +47,9 @@ func (f *fake) ResolveGamertag(ctx context.Context, tag string) (Principal, erro
 }
 func (f *fake) ResolveDevice(_ context.Context, id string) (Principal, error) {
 	if id == mach {
-		return Principal{KindDevice, id, "acct", StatusActive}, nil
+		return Principal{KindDevice, id, "acct", StatusActive, ""}, nil
 	}
-	return Principal{}, &DeniedError{Principal{KindDevice, id, "acct", StatusUnlinked}}
+	return Principal{}, &DeniedError{Principal{KindDevice, id, "acct", StatusUnlinked, ""}}
 }
 func (f *fake) Poll(_ context.Context, after uint64, limit int, _ time.Duration) ([]Revocation, error) {
 	f.mu.Lock()
@@ -97,7 +98,7 @@ func TestResolveContract(t *testing.T) {
 	if p, err := c.ResolveDevice(ctx, mach); err != nil || p.Kind != KindDevice {
 		t.Fatalf("%+v %v", p, err)
 	}
-	if _, err := c.ResolveDevice(ctx, "1111111111111111"); !errors.Is(err, ErrDenied) {
+	if _, err := c.ResolveDevice(ctx, "0000000000001111"); !errors.Is(err, ErrDenied) {
 		t.Fatalf("%v", err)
 	}
 }
@@ -190,5 +191,51 @@ func TestValidID(t *testing.T) {
 		if ValidID(id) != want {
 			t.Errorf("%q", id)
 		}
+	}
+}
+
+func TestMachineIDFormat(t *testing.T) {
+	if id, ok := MachineID(123456789012); !ok || id != "0000001cbe991a14" {
+		t.Fatal(id, ok)
+	}
+	for _, n := range []uint64{0, MaxSerial + 1} {
+		if _, ok := MachineID(n); ok {
+			t.Fatalf("%d accepted", n)
+		}
+	}
+	for id, want := range map[string]bool{"0000001cbe991a14": true, "0000000000000001": true, "0000e8d4a5100000": false, "0009000000000001": false, "0000000000000000": false} {
+		if ValidMachineID(id) != want {
+			t.Errorf("%s: want %v", id, want)
+		}
+	}
+}
+
+type keys struct{}
+
+func (keys) DeviceKey(_ context.Context, id string) (xbcrypto.Key, error) {
+	switch id {
+	case mach:
+		return xbcrypto.Key{1, 2, 3}, nil
+	case "0000000000000002":
+		return xbcrypto.Key{}, &DeniedError{Principal{KindDevice, id, "acct", StatusRevoked, ""}}
+	}
+	return xbcrypto.Key{}, ErrNotFound
+}
+
+func TestDeviceKeyContract(t *testing.T) {
+	s := httptest.NewTLSServer(KeyHandler(keys{}))
+	t.Cleanup(s.Close)
+	c := &Client{Base: s.URL, HTTP: s.Client()}
+	if k, err := c.DeviceKey(context.Background(), mach); err != nil || k != (xbcrypto.Key{1, 2, 3}) {
+		t.Fatalf("%x %v", k, err)
+	}
+	if _, err := c.DeviceKey(context.Background(), "0000000000000002"); !errors.Is(err, ErrDenied) {
+		t.Fatal(err)
+	}
+	if _, err := c.DeviceKey(context.Background(), "0000000000000003"); !errors.Is(err, ErrNotFound) {
+		t.Fatal(err)
+	}
+	if _, err := c.DeviceKey(context.Background(), "0009000000000001"); !errors.Is(err, ErrInvalid) {
+		t.Fatal(err)
 	}
 }

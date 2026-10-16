@@ -13,6 +13,7 @@ import (
 	pb "openpak/xb-live/services/xb-account/internal/corepb"
 
 	"openpak/xb-live/internal/xbaccountapi"
+	"openpak/xb-live/internal/xbcrypto"
 	"openpak/xb-live/services/xb-account/internal/core"
 	"openpak/xb-live/services/xb-account/internal/store"
 )
@@ -27,6 +28,7 @@ type Resolver struct {
 var (
 	_ xbaccountapi.Resolver    = (*Resolver)(nil)
 	_ xbaccountapi.Revocations = (*Resolver)(nil)
+	_ xbaccountapi.DeviceKeys  = (*Resolver)(nil)
 )
 
 func denied(k xbaccountapi.Kind, id, acct string, s xbaccountapi.Status) error {
@@ -80,7 +82,7 @@ func (r *Resolver) ResolveUser(ctx context.Context, xuid string) (xbaccountapi.P
 	} else if s != xbaccountapi.StatusActive {
 		return xbaccountapi.Principal{}, denied(xbaccountapi.KindUser, xuid, u.CoreAccountID, s)
 	}
-	return xbaccountapi.Principal{Kind: xbaccountapi.KindUser, PrincipalID: xuid, CoreAccountID: u.CoreAccountID, Status: xbaccountapi.StatusActive}, nil
+	return xbaccountapi.Principal{Kind: xbaccountapi.KindUser, PrincipalID: xuid, CoreAccountID: u.CoreAccountID, Status: xbaccountapi.StatusActive, Gamertag: u.Gamertag}, nil
 }
 
 // ResolveGamertag looks up the current gamertag alias, then applies exactly
@@ -111,7 +113,7 @@ func (r *Resolver) accountOK(ctx context.Context, id string) (xbaccountapi.Statu
 }
 
 func (r *Resolver) ResolveDevice(ctx context.Context, machineID string) (xbaccountapi.Principal, error) {
-	if !xbaccountapi.ValidID(machineID) {
+	if !xbaccountapi.ValidMachineID(machineID) {
 		return xbaccountapi.Principal{}, xbaccountapi.ErrInvalid
 	}
 	d, err := r.Store.GetDevice(ctx, machineID)
@@ -158,4 +160,22 @@ func (r *Resolver) Poll(ctx context.Context, after uint64, limit int, wait time.
 		case <-time.After(interval):
 		}
 	}
+}
+
+// DeviceKey returns the machine key only after the full ResolveDevice
+// admission (active device, active link, active account).
+func (r *Resolver) DeviceKey(ctx context.Context, machineID string) (xbcrypto.Key, error) {
+	var k xbcrypto.Key
+	if _, err := r.ResolveDevice(ctx, machineID); err != nil {
+		return k, err
+	}
+	b, err := r.Store.DeviceKey(ctx, machineID)
+	switch {
+	case errors.Is(err, store.ErrNotFound):
+		return k, xbaccountapi.ErrNotFound
+	case err != nil:
+		return k, xbaccountapi.ErrUnavailable
+	}
+	copy(k[:], b)
+	return k, nil
 }

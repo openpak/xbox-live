@@ -18,8 +18,10 @@ Flows (all in `internal/kdc`, structures in `internal/krb`):
 Admission always comes from `xbaccountapi.Resolver` (ResolveGamertag,
 ResolveUser, ResolveDevice) over mutual TLS. Unknown, banned, unlinked,
 revoked or unreachable principals are refused; nothing is invented.
-Devices additionally need proof material (`kdc.DeviceKeys`): without it MACS
-answers "principal unknown".
+Devices additionally need proof material (`kdc.DeviceKeys`), fetched per MACS
+request from xb-account (`GET /internal/v1/devices/{id}/key`, xb-auth peer
+only, released only for an admitted device): without it MACS answers
+"principal unknown".
 
 ## Configuration (environment; secrets are files)
 
@@ -31,7 +33,6 @@ answers "principal unknown".
 | `XB_TGS_KEYRING_FILE` | TGT keys, 16 bytes each, local to xb-auth |
 | `XB_SG_KEYRING_FILE` | gateway ticket keys, 16 bytes each, shared with xb-gateway |
 | `XB_USER_KEY_SECRETS_FILE` | 32-byte secrets deriving user and machine-account keys |
-| `XB_DEVICE_KEYS_FILE` | optional interim `{"<machine id>":"<32 hex machine key>"}` |
 | `XB_ACCOUNT_URL`, `XB_ACCOUNT_CA_FILE`, `XB_TLS_CERT_FILE`, `XB_TLS_KEY_FILE` | xb-account (https, TLS 1.3, client cert) |
 | `XB_TGT_LIFETIME`, `XB_TICKET_LIFETIME`, `XB_CLOCK_SKEW`, `XB_REPLAY_MAX` | defaults 24h, 24h, 5m, 65536 |
 
@@ -40,7 +41,13 @@ key version carried in tickets; add a key and make it active, remove an old id
 once its tickets have expired. Group/world-writable files, zero keys and the
 published Xombie prototype keys are refused.
 
-Machine id = the 12-digit serial as a number, 16 lowercase hex digits.
+Machine id = the 12-digit serial as a number, 16 lowercase hex digits
+(see docs/go-service-contracts.md item 4).
+
+Open items: `KDC.UserAccountBlob` builds the account blob for a provisioned
+user, but no network path hands it to a console yet; MACS still delivers only
+the machine account (Xombie's MACS delivered the user account instead). Which
+of the two a retail console expects is unverified on hardware.
 
 Tests: `GOWORK=off go test -race ./internal/krb/ ./services/xb-auth/...`
 (use a scratch TMPDIR). Everything is unit/in-process; no console or emulator

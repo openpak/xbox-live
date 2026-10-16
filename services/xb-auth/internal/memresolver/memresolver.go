@@ -30,7 +30,7 @@ func New() *Resolver {
 func (r *Resolver) SetUser(gamertag, xuid string, st xbaccountapi.Status) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	p := xbaccountapi.Principal{Kind: xbaccountapi.KindUser, PrincipalID: xuid, CoreAccountID: "acct-" + xuid, Status: st}
+	p := xbaccountapi.Principal{Kind: xbaccountapi.KindUser, PrincipalID: xuid, CoreAccountID: "acct-" + xuid, Status: st, Gamertag: gamertag}
 	r.users[strings.ToLower(gamertag)] = p
 	r.byID["user/"+xuid] = p
 }

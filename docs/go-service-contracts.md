@@ -21,3 +21,23 @@ Contracts:
    (principal, account, title, connection generation) bound by the gateway, never
    taken from the client. Unimplemented services return a native "unavailable",
    never a fabricated success.
+4. Machine ID (xb-account, xb-auth, xb-gateway): the console's 12-digit serial
+   read as a decimal number, written as 16 lowercase hex digits
+   (`xbaccountapi.MachineID`; serial 123456789012 = `0000001cbe991a14`).
+   Valid range 1..999999999999 (`ValidMachineID`); XUIDs (`0009...`) are never
+   valid machine IDs. xb-auth maps the MACS serial with `krb.MachineIDFromSerial`.
+   xb-account enforces it at provisioning (Begin/Finalize) and in ResolveDevice.
+5. Device proof material: provisioning's `proof` is the console's 16-byte machine
+   key (`xbcrypto.MachineKey(hdd, online)`). xb-account stores it sealed
+   (AES-GCM under a pepper-derived key, bound to the machine ID) plus a keyed
+   MAC. `GET /internal/v1/devices/{id}/key` (`xbaccountapi.DeviceKeys`) returns
+   it to `spiffe://openpak/xb-auth` only, and only after the full ResolveDevice
+   admission (active device, active core link, active account). 403 denied,
+   404 none. xb-auth's `devicekeys.Remote` is the production source;
+   `XB_DEVICE_KEYS_FILE` is gone (the file store is test-only).
+6. User account blob: `Principal.Gamertag` (users) lets xb-auth build the
+   84-byte account blob (xuid, gamertag, domain, realm, `krb.DeriveUserKey`)
+   via `KDC.UserAccountBlob`; the key is the one AS pre-authentication checks.
+   The channel that delivers it to a console is not built (see xb-auth README).
+7. In-process end-to-end: `test/e2e` (uses `services/*/testkit`, thin wrappers
+   exposing the internal packages to tests only).

@@ -583,3 +583,23 @@ func (k *KDC) serviceAddress(sr *krb.ServiceRequest, xuid uint64) *krb.ServiceAd
 	}
 	return a
 }
+
+// UserAccountBlob returns the account blob a console stores for a user
+// provisioned by xb-account: xuid, gamertag, domain, realm and the user's
+// account key (krb.DeriveUserKey under the active user-key secret), the same
+// layout and key AS pre-authentication later verifies. It is only produced for
+// a currently admitted user. The blob is key material: the caller must seal it
+// for the console (as MACS does with the machine key) and never log it.
+func (k *KDC) UserAccountBlob(ctx context.Context, xuid string) ([]byte, error) {
+	p, err := k.accounts.ResolveUser(ctx, xuid)
+	n, code := admitted(p, err, xbaccountapi.KindUser, xuid)
+	if code != 0 {
+		return nil, fmt.Errorf("kdc: user not admitted (krb error %d)", code)
+	}
+	if !validGamertag(p.Gamertag) {
+		return nil, errors.New("kdc: user has no usable gamertag")
+	}
+	_, secret := k.cfg.UserKeys.Active()
+	return krb.MachineAccount{XUID: n, Gamertag: p.Gamertag, Domain: strings.TrimPrefix(k.cfg.Domains[0], "@"),
+		Realm: k.cfg.Realm, Key: krb.DeriveUserKey(secret, n)}.Marshal()
+}

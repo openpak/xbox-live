@@ -663,3 +663,22 @@ func TestUDPServerEndToEnd(t *testing.T) {
 		t.Fatal("answered garbage")
 	}
 }
+
+func TestUserAccountBlobMatchesSignInKey(t *testing.T) {
+	e := newEnv(t)
+	blob, err := e.kdc.UserAccountBlob(context.Background(), xuidHex)
+	if err != nil || len(blob) != 84 {
+		t.Fatalf("%v %d", err, len(blob))
+	}
+	if binary.LittleEndian.Uint64(blob) != xuid || string(bytes.TrimRight(blob[8:24], "\x00")) != tag {
+		t.Fatalf("blob %x", blob)
+	}
+	k := e.userKey()
+	if !bytes.Equal(blob[68:], k[:]) {
+		t.Fatal("blob key is not the AS pre-authentication key")
+	}
+	e.res.SetUser(tag, xuidHex, xbaccountapi.StatusBanned)
+	if _, err := e.kdc.UserAccountBlob(context.Background(), xuidHex); err == nil {
+		t.Fatal("blob issued for a banned user")
+	}
+}

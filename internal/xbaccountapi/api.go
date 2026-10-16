@@ -11,7 +11,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
+
+	"openpak/xb-live/internal/xbcrypto"
 )
 
 // Status is the admission status of a principal. Only StatusActive admits.
@@ -24,6 +27,36 @@ const (
 	StatusRevoked  Status = "revoked" // credential revoked (devices)
 	StatusDeleted  Status = "deleted"
 )
+
+// MaxSerial is the largest console serial number (12 decimal digits).
+const MaxSerial = 999999999999
+
+// MachineID formats a console serial number as the machine ID used everywhere
+// (xb-account, xb-auth, xb-gateway): the 12-digit serial read as a decimal
+// number, written as 16 lowercase hex digits. Serial "123456789012" is
+// "0000001cbe991a14". ok is false for zero or more than 12 digits.
+func MachineID(serial uint64) (string, bool) {
+	if serial == 0 || serial > MaxSerial {
+		return "", false
+	}
+	return fmt.Sprintf("%016x", serial), true
+}
+
+// ValidMachineID reports whether id is a ValidID that is a possible serial.
+func ValidMachineID(id string) bool {
+	if !ValidID(id) {
+		return false
+	}
+	n, err := strconv.ParseUint(id, 16, 64)
+	return err == nil && n <= MaxSerial
+}
+
+// DeviceKeys exposes per-console proof material (the 16-byte machine key,
+// xbcrypto.MachineKey) that xb-account stores at provisioning. It is only
+// answered for an active, admitted device, and only to xb-auth.
+type DeviceKeys interface {
+	DeviceKey(ctx context.Context, machineID string) (xbcrypto.Key, error)
+}
 
 // Valid reports whether s is a known status.
 func (s Status) Valid() bool {
@@ -48,6 +81,9 @@ type Principal struct {
 	PrincipalID   string `json:"principal_id"`
 	CoreAccountID string `json:"core_account_id"`
 	Status        Status `json:"status"`
+	// Gamertag is set for users only (the current alias); xb-auth needs it to
+	// build the user's account blob. Empty for devices.
+	Gamertag string `json:"gamertag,omitempty"`
 }
 
 var (

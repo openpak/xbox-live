@@ -18,11 +18,11 @@ import (
 )
 
 const (
-	machine   = "00aa00bb00cc00dd"
+	machine   = "0000001cbe991a14"
 	challenge = "device-nonce-0123456789"
 )
 
-var proof = bytes.Repeat([]byte{7}, 32)
+var proof = bytes.Repeat([]byte{7}, 16)
 
 type env struct {
 	core *coretest.Core
@@ -85,7 +85,7 @@ func TestHappyPathIsIdempotentAndUsesXboxNamespace(t *testing.T) {
 	if ok, _ := e.db.VerifyDeviceProof(ctx, machine, proof); !ok {
 		t.Fatal("device proof should verify")
 	}
-	if ok, _ := e.db.VerifyDeviceProof(ctx, machine, bytes.Repeat([]byte{8}, 32)); ok {
+	if ok, _ := e.db.VerifyDeviceProof(ctx, machine, bytes.Repeat([]byte{8}, 16)); ok {
 		t.Fatal("wrong proof verified")
 	}
 	// Retry: same result, no second core link, no extra reserve.
@@ -112,7 +112,7 @@ func TestTokenBinding(t *testing.T) {
 		t.Fatalf("wrong challenge: %v", err)
 	}
 	bad = fin(tok, "P")
-	bad.MachineID = "1111111111111111"
+	bad.MachineID = "0000000000001111"
 	if _, err := e.p.Finalize(ctx, bad); !errors.Is(err, ErrToken) {
 		t.Fatalf("wrong machine: %v", err)
 	}
@@ -159,7 +159,7 @@ func TestOnePrimaryUserPerAccount(t *testing.T) {
 	if _, err := e.p.Finalize(ctx, fin(e.begin(t, "acct1", machine), "One")); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := e.p.Begin(ctx, BeginRequest{CoreAccountID: "acct1", MachineID: "2222222222222222", Challenge: challenge}); !errors.Is(err, ErrAlreadyLinked) {
+	if _, _, err := e.p.Begin(ctx, BeginRequest{CoreAccountID: "acct1", MachineID: "0000000000002222", Challenge: challenge}); !errors.Is(err, ErrAlreadyLinked) {
 		t.Fatalf("second begin: %v", err)
 	}
 }
@@ -168,7 +168,7 @@ func TestTwoTokensRaceForOneAccountOnlyOneWins(t *testing.T) {
 	e := setup(t)
 	ctx := context.Background()
 	t1 := e.begin(t, "acct1", machine)
-	t2 := e.begin(t, "acct1", "3333333333333333")
+	t2 := e.begin(t, "acct1", "0000000000003333")
 	var wg sync.WaitGroup
 	errs := make([]error, 2)
 	for i, tok := range []string{t1, t2} {
@@ -177,7 +177,7 @@ func TestTwoTokensRaceForOneAccountOnlyOneWins(t *testing.T) {
 			defer wg.Done()
 			r := fin(tok, []string{"Alpha", "Beta"}[i])
 			if i == 1 {
-				r.MachineID = "3333333333333333"
+				r.MachineID = "0000000000003333"
 			}
 			_, errs[i] = e.p.Finalize(ctx, r)
 		}()
@@ -226,9 +226,9 @@ func TestGamertagTakenRollsBack(t *testing.T) {
 	if _, err := e.p.Finalize(ctx, fin(e.begin(t, "acct1", machine), "Taken")); err != nil {
 		t.Fatal(err)
 	}
-	tok := e.begin(t, "acct2", "4444444444444444")
+	tok := e.begin(t, "acct2", "0000000000004444")
 	r := fin(tok, "taken") // case-insensitive collision
-	r.MachineID = "4444444444444444"
+	r.MachineID = "0000000000004444"
 	if _, err := e.p.Finalize(ctx, r); !errors.Is(err, ErrGamertagTaken) {
 		t.Fatalf("got %v", err)
 	}
