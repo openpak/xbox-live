@@ -22,3 +22,11 @@ Reviewed upstream paths: README.md, LICENSE, Cargo.toml, Dockerfile,
 docker-compose.yml, services/kdc/Cargo.toml, services/sg/Cargo.toml and the two
 bundled license files above. Protocol implementation work must add packet or
 public-document references; inherited code is not proof of hardware parity.
+
+## Native gateway port follow-up
+
+The supplied dashboard online module has a literal UDP destination 3074 store
+in its native SG-init packet builder. Full evidence and capture limitations:
+https://github.com/openpak/docs/blob/main/xbox/gateway-port-audit-2026-10-16.md .
+This is independent client-code evidence; do not describe --sg-port as native
+port negotiation. No backend service was started by the isolated capture test.
