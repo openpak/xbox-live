@@ -129,7 +129,7 @@ func TestMapErrClasses(t *testing.T) {
 		codes.FailedPrecondition: ErrConflict, codes.AlreadyExists: ErrConflict,
 		codes.Internal: ErrUnavailable, codes.DeadlineExceeded: ErrUnavailable, codes.Unauthenticated: ErrUnavailable,
 	} {
-		if got := mapErr(status.Error(code, "x")); got != want {
+		if got := mapErr(status.Error(code, "x")); !errors.Is(got, want) {
 			t.Errorf("%v: %v want %v", code, got, want)
 		}
 	}

@@ -13,6 +13,7 @@ import (
 
 	"openpak/xb-live/internal/xbaccountapi"
 	"openpak/xb-live/internal/xbfeature"
+	"openpak/xb-live/services/xb-social/internal/core"
 	"openpak/xb-live/services/xb-social/internal/coretest"
 	"openpak/xb-live/services/xb-social/internal/social"
 )
@@ -351,5 +352,69 @@ func TestOfflineOnClose(t *testing.T) {
 	e.do(t, info(xAlice), "xon/1", aliveFor(t, 0, 0))
 	if len(e.c.Sessions("alice")) != 0 {
 		t.Fatalf("still online after close: %v", e.c.Sessions("alice"))
+	}
+}
+
+// A presence-refresh failure must never fail the Alive: the console still gets
+// its lists. Covers core answering NotFound / FailedPrecondition / Unavailable
+// on the session calls, and a lease left by another connection generation.
+func TestAliveSurvivesPresenceFailures(t *testing.T) {
+	alive := aliveFor(t, 0, 0)
+	for _, op := range []string{"RegisterSession", "Heartbeat", "ExpireSession"} {
+		for name, ferr := range map[string]error{"unavailable": core.ErrUnavailable, "notfound": core.ErrNotFound, "conflict": core.ErrConflict} {
+			e := newEnv(t)
+			// First Alive in one title creates a lease; then core starts failing and the title changes.
+			e.do(t, info(xAlice), "xon/1", alive2(xAlice, 0x4d530001))
+			e.c.Fail = func(o string) error {
+				if o == op {
+					return ferr
+				}
+				return nil
+			}
+			code, out := e.do(t, info(xAlice), "xon/1", alive)
+			if code != "HTTP/1.0 200 OK X-Err:0" || len(out) < 48 {
+				t.Errorf("%s/%s: %q", op, name, code)
+			}
+			// Same title again (the Heartbeat path).
+			code, _ = e.do(t, info(xAlice), "xon/1", alive2(xAlice, 0x4d530001))
+			if code != "HTTP/1.0 200 OK X-Err:0" {
+				t.Errorf("%s/%s same title: %q", op, name, code)
+			}
+		}
+	}
+}
+
+func TestAliveTakesOverLeaseFromAnotherGeneration(t *testing.T) {
+	e := newEnv(t)
+	// Another connection (older generation) left a live lease for the same title.
+	old := info(xAlice)
+	old.Generation = 1
+	e.do(t, old, "xon/1", alive2(xAlice, 0x4d530001))
+	e.c.Advance(60e9)
+	newer := info(xAlice)
+	newer.Generation = 2
+	if code, _ := e.do(t, newer, "xon/1", alive2(xAlice, 0x4d530001)); code != "HTTP/1.0 200 OK X-Err:0" {
+		t.Fatalf("takeover: %q", code)
+	}
+	if got := e.c.Sessions("alice"); len(got) != 1 || got[0] != "xbox/4d530001" {
+		t.Fatalf("sessions %v", got)
+	}
+	// A foreign seeded session in the same title (other namespace) coexists.
+	e.c.AddForeignSession("alice", "switch", "4d530001")
+	if code, _ := e.do(t, newer, "xon/1", alive2(xAlice, 0x4d530001)); code != "HTTP/1.0 200 OK X-Err:0" {
+		t.Fatalf("with foreign session: %q", code)
+	}
+}
+
+func TestAliveWithoutInvitationInbox(t *testing.T) {
+	e := newEnv(t)
+	e.c.Fail = func(o string) error {
+		if o == "ListInvitations" {
+			return core.ErrUnavailable // e.g. an older core without the call
+		}
+		return nil
+	}
+	if code, _ := e.do(t, info(xAlice), "xon/1", aliveFor(t, 0, 0)); code != "HTTP/1.0 200 OK X-Err:0" {
+		t.Fatalf("%q", code)
 	}
 }

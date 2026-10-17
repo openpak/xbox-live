@@ -20,6 +20,7 @@ package social
 import (
 	"context"
 	"errors"
+	"fmt"
 	"hash/fnv"
 	"log"
 	"sort"
@@ -265,14 +266,20 @@ func (s *Service) Roster(ctx context.Context, viewerXUID, gatewayAccount string)
 func (s *Service) RosterOf(ctx context.Context, account string) (*Roster, error) {
 	fl, err := s.friendsSvc().FriendsOf(ctx, account)
 	if err != nil {
-		return nil, ErrUnavailable
+		return nil, fmt.Errorf("%w: friends: %v", ErrUnavailable, err)
 	}
 	in, err1 := s.Core.ListIncoming(ctx, account)
 	out, err2 := s.Core.ListOutgoing(ctx, account)
 	bl, err3 := s.Core.ListBlocks(ctx, account)
+	if err := errors.Join(err1, err2, err3); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
+	}
+	// The invitation inbox is not part of the friend list: if core cannot
+	// list it (or does not offer the call) the roster is still valid without it.
 	inv, err4 := s.Core.ListInvitations(ctx, account, 100)
-	if err := errors.Join(err1, err2, err3, err4); err != nil {
-		return nil, ErrUnavailable
+	if err4 != nil {
+		log.Printf("roster: invitation inbox unavailable (omitted): %v", err4)
+		inv = nil
 	}
 	var ids []string
 	for _, f := range in {

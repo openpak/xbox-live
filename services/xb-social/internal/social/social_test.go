@@ -151,7 +151,7 @@ func TestRosterProjection(t *testing.T) {
 }
 
 func TestRosterFailsWholeOnBackendError(t *testing.T) {
-	for _, op := range []string{"ListFriends", "ListIncoming", "ListOutgoing", "ListBlocks", "ListInvitations", "ActiveLink"} {
+	for _, op := range []string{"ListFriends", "ListIncoming", "ListOutgoing", "ListBlocks", "ActiveLink"} {
 		e := newEnv(t)
 		e.befriend("alice", "bob", xA, xB)
 		e.c.Fail = func(o string) error {
@@ -311,9 +311,9 @@ func TestPresenceSemantics(t *testing.T) {
 	if got := e.c.Sessions("alice"); len(got) != 0 {
 		t.Fatalf("after disconnect %v", got)
 	}
-	// Banned account: refused.
+	// Banned account: core refuses the session, nothing is published.
 	e.c.Ban("bob")
-	if err := e.p.Publish(ctx, "bob", xB, t1, 1, 0); !errors.Is(err, ErrDenied) {
+	if err := e.p.Publish(ctx, "bob", xB, t1, 1, 0); err == nil || len(e.c.Sessions("bob")) != 0 {
 		t.Fatalf("banned publish: %v", err)
 	}
 	// Core down: honest error, nothing recorded.

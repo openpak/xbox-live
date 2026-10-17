@@ -125,24 +125,25 @@ func (m *Presences) publish(ctx context.Context, l *lease, account, xuid, title 
 			l.gen, l.xuid, l.deadline = gen, xuid, maxTime(l.deadline, deadline)
 			return nil
 		} else if !errors.Is(err, core.ErrNotFound) {
-			return ErrUnavailable
+			log.Printf("presence: heartbeat failed, registering again: %v", err)
 		}
-		// the session lapsed or was replaced elsewhere: register again
+		// the session lapsed, was replaced elsewhere, or core could not renew it:
+		// register again (it replaces whatever live row exists for this title)
 	}
 	old := l.session
 	id, _, err := m.Core.RegisterSession(ctx, account, title, "xbox:"+xuid, 0)
 	switch {
 	case err == nil:
-	case errors.Is(err, core.ErrNotFound):
-		return ErrDenied // inactive or unknown account
 	default:
-		return ErrUnavailable
+		// Includes NotFound (core's answer for an inactive account): the caller
+		// has already been admitted by the resolver, so this is not a refusal.
+		return fmt.Errorf("%w: register session: %v", ErrUnavailable, err)
 	}
 	l.session, l.title, l.gen, l.xuid, l.deadline = id, title, gen, xuid, deadline
 	if old != "" && old != id {
 		// Best effort: a failure only leaves the old title until its 30 s lease ends.
-		if err := m.Core.ExpireSession(ctx, old); err != nil {
-			log.Printf("presence: expire old session failed")
+		if err := m.Core.ExpireSession(ctx, old); err != nil && !errors.Is(err, core.ErrNotFound) && !errors.Is(err, core.ErrConflict) {
+			log.Printf("presence: expire old session failed (ignored): %v", err)
 		}
 	}
 	return nil

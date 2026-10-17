@@ -388,7 +388,12 @@ func (s *Server) alive(ctx context.Context, c Call, msgs [][]byte) (result, erro
 		return result{}, err
 	}
 	if err := s.Presence.Publish(ctx, account, c.XUID, social.TitleKey(ps[0].title), c.Info.Generation, s.TTL); err != nil {
-		return result{}, err
+		// Presence is best effort: the console still gets its lists. Only a
+		// refusal (not admitted, or a newer connection owns the account) ends the Alive.
+		if errors.Is(err, social.ErrDenied) || errors.Is(err, social.ErrSuperseded) {
+			return result{}, err
+		}
+		log.Printf("svc1: presence not published (continuing): %v", err)
 	}
 	roster, err := s.Social.RosterOf(ctx, account)
 	if err != nil {

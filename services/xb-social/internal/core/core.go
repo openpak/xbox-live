@@ -10,6 +10,7 @@ package core
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"google.golang.org/grpc"
@@ -79,18 +80,21 @@ func (c *Client) ctx(p context.Context) (context.Context, context.CancelFunc) {
 	return metadata.AppendToOutgoingContext(ctx, "authorization", "Bearer "+c.key), cancel
 }
 
+// mapErr classifies a core error and keeps the real gRPC status in the text
+// (errors.Is still matches the class), so logs say what core answered.
 func mapErr(err error) error {
+	class := ErrUnavailable
 	switch status.Code(err) {
 	case codes.NotFound:
-		return ErrNotFound
+		class = ErrNotFound
 	case codes.InvalidArgument:
-		return ErrInvalid
+		class = ErrInvalid
 	case codes.PermissionDenied:
-		return ErrDenied
+		class = ErrDenied
 	case codes.FailedPrecondition, codes.AlreadyExists:
-		return ErrConflict
+		class = ErrConflict
 	}
-	return ErrUnavailable
+	return fmt.Errorf("%w (grpc %s: %s)", class, status.Code(err), status.Convert(err).Message())
 }
 
 func (c *Client) ListFriends(p context.Context, account string) ([]Friend, error) {
