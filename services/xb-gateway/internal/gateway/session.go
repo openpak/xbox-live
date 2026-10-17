@@ -503,7 +503,7 @@ func (s *Session) logFrame(dir string, op sgwire.Opcode, footer, payload []byte)
 		}
 		tags := make([]string, 0, len(chunks))
 		for _, c := range chunks {
-			tags = append(tags, fmt.Sprintf("%#x/%d", c.Tag, len(c.Data)))
+			tags = append(tags, fmt.Sprintf("%#x/%d:%s", c.Tag, len(c.Data), hex.EncodeToString(c.Data[:min(len(c.Data), 32)])))
 		}
 		s.srv.frameLog(dir+" control", "gen", s.identity.Generation, "chunks", strings.Join(tags, ","))
 		return
@@ -517,7 +517,7 @@ func (s *Session) logFrame(dir string, op sgwire.Opcode, footer, payload []byte)
 	if n := hdr.OptionsLen(); n <= len(data) {
 		data = data[n:]
 	}
-	pre := data[:min(len(data), 64)]
+	pre := data[:min(len(data), 320)]
 	s.srv.frameLog(dir+" tcp", "gen", s.identity.Generation, "op", uint8(op), "sport", hdr.Src, "dport", hdr.Dst,
 		"flags", fmt.Sprintf("%#x", hdr.Flags()), "seq", hdr.Seq, "ack", hdr.Ack, "win", hdr.Window, "dlen", len(data), "hex", hex.EncodeToString(pre))
 }
