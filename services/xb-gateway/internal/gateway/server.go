@@ -26,13 +26,15 @@ type stats struct {
 
 // Server is the UDP listener plus session table.
 type Server struct {
-	cfg      Config
-	log      *slog.Logger
-	verifier TicketVerifier
-	dir      Directory
-	backends map[uint32]Backend
-	now      func() time.Time
-	capture  *capture
+	// halfGrace overrides defaultHalfCloseGrace (tests).
+	halfGrace time.Duration
+	cfg       Config
+	log       *slog.Logger
+	verifier  TicketVerifier
+	dir       Directory
+	backends  map[uint32]Backend
+	now       func() time.Time
+	capture   *capture
 
 	conn    *net.UDPConn
 	initSem chan struct{}

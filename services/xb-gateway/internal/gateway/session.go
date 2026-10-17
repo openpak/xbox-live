@@ -29,8 +29,13 @@ type tcpState int
 const (
 	synReceived tcpState = iota
 	established
+	rcvClosed // the console sent FIN (half-close): it still reads our reply
 	finSent
 )
+
+// defaultHalfCloseGrace bounds how long a connection the console half-closed
+// may wait for the backend to answer and end the stream.
+const defaultHalfCloseGrace = 15 * time.Second
 
 type tcpConn struct {
 	key     tcpKey
@@ -43,6 +48,7 @@ type tcpConn struct {
 	queue   chan []byte
 	done    chan struct{}
 	once    sync.Once
+	grace   *time.Timer // half-close deadline; guarded by Session.mu
 }
 
 // Session is the per-connection encrypted SG state. It holds transport state
@@ -275,7 +281,13 @@ func (s *Session) handleTCP(hdr sgwire.TCPHeader, payload []byte) {
 	}
 	if len(data) > 0 || flags&sgwire.TCPFin != 0 {
 		if hdr.Seq != c.rcvNxt {
-			s.sendTCP(c, sgwire.TCPAck, nil, nil) // duplicate/out-of-order: re-ack, no reassembly
+			s.sendTCP(c, sgwire.TCPAck, nil, nil) // duplicate/out-of-order (incl. a retransmitted FIN): re-ack, no reassembly
+			return
+		}
+		if len(data) > 0 && c.state != established {
+			// Data after the console's own FIN, or after ours: not allowed.
+			s.sendTCP(c, sgwire.TCPRst|sgwire.TCPAck, nil, nil)
+			s.dropConn(c)
 			return
 		}
 		if len(data) > 0 {
@@ -290,20 +302,47 @@ func (s *Session) handleTCP(hdr sgwire.TCPHeader, payload []byte) {
 		}
 		if flags&sgwire.TCPFin != 0 {
 			c.rcvNxt++
-			fl := uint16(sgwire.TCPAck)
-			if c.state != finSent {
-				fl |= sgwire.TCPFin
-				c.state = finSent
+			s.sendTCP(c, sgwire.TCPAck, nil, nil)
+			switch c.state {
+			case established:
+				// A FIN is a half-close: the request may still be answered. Tell
+				// the backend (after the bytes already queued) that the console
+				// is done sending, keep our side open, and bound the wait.
+				c.state = rcvClosed
+				select {
+				case c.queue <- nil:
+				default:
+					s.sendTCP(c, sgwire.TCPRst|sgwire.TCPAck, nil, nil)
+					s.dropConn(c)
+					return
+				}
+				grace := s.srv.halfGrace
+				if grace <= 0 {
+					grace = defaultHalfCloseGrace
+				}
+				c.grace = time.AfterFunc(grace, func() { s.graceExpired(c) })
+			case finSent: // we had already closed: both directions are done
+				s.dropConn(c)
 			}
-			s.sendTCP(c, fl, nil, nil)
-			if fl&sgwire.TCPFin != 0 {
-				c.sndNxt++
-			}
-			s.dropConnLater(c)
 			return
 		}
 		s.sendTCP(c, sgwire.TCPAck, nil, nil)
 	}
+}
+
+// graceExpired ends a half-closed connection whose backend never finished.
+func (s *Session) graceExpired(c *tcpConn) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed || s.conns[c.key] != c {
+		return
+	}
+	if c.state == rcvClosed {
+		s.sendTCP(c, sgwire.TCPFin|sgwire.TCPAck, nil, nil)
+		c.sndNxt++
+		c.state = finSent
+	}
+	s.dropConn(c)
 }
 
 func mssSynOptions() []byte { return binary.BigEndian.AppendUint16([]byte{2, 4}, defaultMSS) }
@@ -361,6 +400,14 @@ func (s *Session) pump(c *tcpConn) {
 	for {
 		select {
 		case data := <-c.queue:
+			if data == nil { // the console's FIN, after everything it sent
+				if h, ok := c.stream.(HalfCloser); ok {
+					h.CloseSend()
+				} else {
+					c.stream.Close()
+				}
+				continue
+			}
 			if err := c.stream.Receive(data); err != nil {
 				s.mu.Lock()
 				if s.conns[c.key] == c {
@@ -379,6 +426,9 @@ func (s *Session) pump(c *tcpConn) {
 func (c *tcpConn) shutdown() {
 	c.once.Do(func() {
 		close(c.done)
+		if c.grace != nil {
+			c.grace.Stop()
+		}
 		if c.stream != nil {
 			go c.stream.Close()
 		}
@@ -403,7 +453,7 @@ func (k *sink) Send(data []byte) error {
 	s, c := k.s, k.c
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.closed || s.conns[c.key] != c || c.state != established {
+	if s.closed || s.conns[c.key] != c || (c.state != established && c.state != rcvClosed) {
 		return errors.New("connection closed")
 	}
 	for len(data) > 0 {
@@ -422,9 +472,10 @@ func (k *sink) Close() {
 	if s.closed || s.conns[c.key] != c {
 		return
 	}
-	if c.state == established {
+	if c.state == established || c.state == rcvClosed {
 		s.sendTCP(c, sgwire.TCPFin|sgwire.TCPAck, nil, nil)
 		c.sndNxt++
+		c.state = finSent
 	}
 	s.dropConn(c)
 }

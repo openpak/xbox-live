@@ -74,6 +74,7 @@ type grpcStream struct{ s *xbfeature.Stream }
 
 func (g grpcStream) Receive(data []byte) error { return g.s.Send(data) }
 func (g grpcStream) Close()                    { g.s.Close() }
+func (g grpcStream) CloseSend()                { g.s.CloseSend() }
 
 // Check reports whether the channel is currently connected (idle counts as reachable).
 func (b *GRPCBackend) Check(ctx context.Context) error {

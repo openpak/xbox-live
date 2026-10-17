@@ -91,6 +91,10 @@ type Stream interface {
 	Close()
 }
 
+// HalfCloser is implemented by streams that can be told the console will send
+// no more bytes while the backend may still answer.
+type HalfCloser interface{ CloseSend() }
+
 // Backend is a feature service (gRPC over mTLS in production). Open returning
 // ErrUnavailable produces the native unavailable outcome.
 type Backend interface {
