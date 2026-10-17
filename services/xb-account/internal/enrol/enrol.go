@@ -39,6 +39,7 @@ import (
 	"openpak/xb-live/internal/xbaccountapi"
 	"openpak/xb-live/internal/xbcodes"
 	"openpak/xb-live/internal/xbenrolapi"
+	"openpak/xb-live/services/xb-account/internal/autoid"
 	"openpak/xb-live/services/xb-account/internal/core"
 	"openpak/xb-live/services/xb-account/internal/projection"
 	"openpak/xb-live/services/xb-account/internal/store"
@@ -322,7 +323,7 @@ func (s *Service) Approve(ctx context.Context, account, typed string) (Approval,
 		if err != nil {
 			return Approval{}, ErrUnavailable
 		}
-		if l, err := s.Core.GetActiveLinkByAccount(ctx, account); err == nil && !projection.Is(l.SubjectID) {
+		if l, err := s.Core.GetActiveLinkByAccount(ctx, account); err == nil && !projection.Is(l.SubjectID) && !s.autoIdentity(ctx, account) {
 			return Approval{}, ErrConflict
 		} else if err != nil && !errors.Is(err, core.ErrNotFound) {
 			return Approval{}, ErrUnavailable
@@ -387,6 +388,9 @@ func (s *Service) advance(ctx context.Context, e *store.Enrolment) error {
 		// The console-less projection link yields to the real one; the gate keeps
 		// the reconciler from re-creating it before we reserve.
 		defer projection.Lock()()
+		if (&autoid.Service{Core: s.Core, Store: s.Store}).Release(ctx, e.CoreAccountID) != nil {
+			return ErrUnavailable
+		}
 		if projection.Release(ctx, s.Core, e.CoreAccountID) != nil {
 			return ErrUnavailable
 		}
@@ -580,4 +584,11 @@ func (s *Service) CompleteSignup(ctx context.Context, machineID, typedCode, game
 		return Signup{}, ErrNoDevice
 	}
 	return Signup{}, ErrUnavailable
+}
+
+// autoIdentity reports whether the account's Xbox identity is an automatic one
+// (no credentials); the real enrolment retires and replaces it.
+func (s *Service) autoIdentity(ctx context.Context, account string) bool {
+	_, ok, err := s.Store.AutoIdentity(ctx, account)
+	return err == nil && ok
 }

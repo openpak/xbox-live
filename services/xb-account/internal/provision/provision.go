@@ -31,6 +31,7 @@ import (
 	pb "openpak/xb-live/services/xb-account/internal/corepb"
 
 	"openpak/xb-live/internal/xbaccountapi"
+	"openpak/xb-live/services/xb-account/internal/autoid"
 	"openpak/xb-live/services/xb-account/internal/core"
 	"openpak/xb-live/services/xb-account/internal/projection"
 	"openpak/xb-live/services/xb-account/internal/store"
@@ -113,7 +114,7 @@ func (p *Provisioner) Begin(ctx context.Context, r BeginRequest) (token string, 
 	if err != nil {
 		return "", time.Time{}, ErrUnavailable
 	}
-	if l, err := p.Core.GetActiveLinkByAccount(ctx, r.CoreAccountID); err == nil && !projection.Is(l.SubjectID) {
+	if l, err := p.Core.GetActiveLinkByAccount(ctx, r.CoreAccountID); err == nil && !projection.Is(l.SubjectID) && !p.autoIdentity(ctx, r.CoreAccountID) {
 		return "", time.Time{}, ErrAlreadyLinked
 	} else if err != nil && !errors.Is(err, core.ErrNotFound) {
 		return "", time.Time{}, ErrUnavailable
@@ -279,6 +280,9 @@ func (p *Provisioner) advance(ctx context.Context, rec *store.Provision) error {
 	}
 	if rec.State == store.ProvClaimed {
 		defer projection.Lock()()
+		if (&autoid.Service{Core: p.Core, Store: p.Store}).Release(ctx, rec.CoreAccountID) != nil {
+			return ErrUnavailable
+		}
 		if projection.Release(ctx, p.Core, rec.CoreAccountID) != nil {
 			return ErrUnavailable
 		}
@@ -376,4 +380,11 @@ func (p *Provisioner) Reap(ctx context.Context) (int, error) {
 		unlock()
 	}
 	return n, nil
+}
+
+// autoIdentity reports whether the account's current Xbox identity is an
+// automatic one (no credentials), which a real enrolment replaces.
+func (p *Provisioner) autoIdentity(ctx context.Context, account string) bool {
+	_, ok, err := p.Store.AutoIdentity(ctx, account)
+	return err == nil && ok
 }

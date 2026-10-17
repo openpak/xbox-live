@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"openpak/xb-live/services/xb-account/internal/autoid"
 	"openpak/xb-live/services/xb-account/internal/core"
 	pb "openpak/xb-live/services/xb-account/internal/corepb"
 	"openpak/xb-live/services/xb-account/internal/coretest"
@@ -357,5 +358,28 @@ func TestRollbackSurvivesCoreOutage(t *testing.T) {
 	}
 	if _, err := e.core.GetActiveLinkByAccount(ctx, "acct1"); !errors.Is(err, core.ErrNotFound) {
 		t.Fatal("link remained after rollback")
+	}
+}
+
+// An automatic identity (no credentials) yields to the real provisioning.
+func TestProvisioningReplacesAnAutomaticIdentity(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	auto := &autoid.Service{Core: e.core, Store: e.db}
+	if ok, err := auto.Ensure(ctx, "acct1"); !ok || err != nil {
+		t.Fatal(ok, err)
+	}
+	before, _, _ := e.db.ActiveUserOf(ctx, "acct1")
+	tok := e.begin(t, "acct1", machine)
+	res, err := e.p.Finalize(ctx, FinalizeRequest{Token: tok, MachineID: machine, Challenge: challenge, Gamertag: "RealTag", Proof: proof})
+	if err != nil {
+		t.Fatal(err)
+	}
+	after, ok, _ := e.db.ActiveUserOf(ctx, "acct1")
+	if !ok || after.Gamertag != "RealTag" || after.XUID != res.XUID || after.XUID == before.XUID {
+		t.Fatalf("before %+v after %+v result %+v", before, after, res)
+	}
+	if _, ok, _ := e.db.AutoIdentity(ctx, "acct1"); ok {
+		t.Fatal("auto marker must be gone")
 	}
 }

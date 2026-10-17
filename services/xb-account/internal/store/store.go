@@ -64,6 +64,8 @@ CREATE TABLE IF NOT EXISTS name_reservations(
  alias_lower TEXT PRIMARY KEY, gamertag TEXT NOT NULL, machine_id TEXT NOT NULL, core_account_id TEXT NOT NULL UNIQUE,
  expires INTEGER NOT NULL, created INTEGER NOT NULL);
 CREATE UNIQUE INDEX IF NOT EXISTS name_reservations_machine ON name_reservations(machine_id);
+CREATE TABLE IF NOT EXISTS auto_identities(
+ core_account_id TEXT PRIMARY KEY, xuid TEXT NOT NULL UNIQUE, created INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS cursors(name TEXT PRIMARY KEY, version INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS processed_events(event_id TEXT PRIMARY KEY, version INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS revocations(
