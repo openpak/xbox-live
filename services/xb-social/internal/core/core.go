@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-// Package core is xb-social's read-only view of account core: the canonical
-// friend graph (Social), live presence (Sessions) and adapter links (Links).
-// xb-social never writes the graph and never keeps its own copy of it.
+// Package core is xb-social's client of account core: the canonical friend
+// graph (Social), live sessions and invitations (Sessions, Invitations), the
+// durable event stream (Events) and adapter links (Links). Core stays the only
+// authority; xb-social keeps no copy of the graph, only the session ids of the
+// leases it published itself.
 package core
 
 import (
@@ -23,6 +25,13 @@ const Namespace = "xbox"
 var (
 	ErrNotFound    = errors.New("core: not found")
 	ErrUnavailable = errors.New("core: unavailable")
+	// ErrInvalid: core rejected the request as malformed (InvalidArgument, e.g. self request).
+	ErrInvalid = errors.New("core: invalid request")
+	// ErrDenied: core policy refused (PermissionDenied: blocks, not friends).
+	ErrDenied = errors.New("core: denied")
+	// ErrConflict: the request does not fit the current state (FailedPrecondition:
+	// not pending, reverse request pending, blocked, no live session).
+	ErrConflict = errors.New("core: state conflict")
 )
 
 type Friend struct {
@@ -53,11 +62,16 @@ type Client struct {
 	social   pb.SocialClient
 	sessions pb.SessionsClient
 	links    pb.LinksClient
+	invites  pb.InvitationsClient
+	events   pb.EventsClient
 	key      string
 }
 
+var _ Backend = (*Client)(nil)
+
 func New(conn grpc.ClientConnInterface, key string) *Client {
-	return &Client{pb.NewSocialClient(conn), pb.NewSessionsClient(conn), pb.NewLinksClient(conn), key}
+	return &Client{pb.NewSocialClient(conn), pb.NewSessionsClient(conn), pb.NewLinksClient(conn),
+		pb.NewInvitationsClient(conn), pb.NewEventsClient(conn), key}
 }
 
 func (c *Client) ctx(p context.Context) (context.Context, context.CancelFunc) {
@@ -66,8 +80,15 @@ func (c *Client) ctx(p context.Context) (context.Context, context.CancelFunc) {
 }
 
 func mapErr(err error) error {
-	if status.Code(err) == codes.NotFound {
+	switch status.Code(err) {
+	case codes.NotFound:
 		return ErrNotFound
+	case codes.InvalidArgument:
+		return ErrInvalid
+	case codes.PermissionDenied:
+		return ErrDenied
+	case codes.FailedPrecondition, codes.AlreadyExists:
+		return ErrConflict
 	}
 	return ErrUnavailable
 }

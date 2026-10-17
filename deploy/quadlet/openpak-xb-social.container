@@ -1,0 +1,35 @@
+# MAIN host (quilted-waffle). Native Xbox presence/friends/invitations for the
+# gateway: owns service id 1 (presence). NOT deployed; do not install until the
+# wire plug-ins exist (docs/xbox/social-protocol.md), see services/xb-social/README.md.
+# Private API only: published on the ZeroTier address, never on a public interface.
+# Gateway: XBGW_BACKENDS=1=<zerotier-address>:<XB_FEATURE port> (replaces the
+# xb-account svc1 stub on port 26113 for id 1).
+[Unit]
+Description=OpenPak Xbox social service (presence, friends, invitations; private API)
+After=openpak-account.service openpak-xb-account.service
+Wants=openpak-xb-account.service
+
+[Container]
+ContainerName=openpak-xb-social
+# REPLACE_DIGEST: image published by CI for the tag being deployed (no AutoUpdate=).
+Image=ghcr.io/openpak/xb-social@sha256:REPLACE_DIGEST
+Network=openpak.network
+# REPLACE_IP: run pin-ips.sh --apply for a new quadlet on openpak.network.
+IP=REPLACE_IP
+# 10.212.63.196 = main's ZeroTier address. REPLACE_FEATURE_PORT after the listener audit.
+PublishPort=10.212.63.196:REPLACE_FEATURE_PORT:REPLACE_FEATURE_PORT/tcp
+ReadOnly=true
+DropCapability=ALL
+NoNewPrivileges=true
+User=10001:10001
+EnvironmentFile=%h/openpak/deploy/xbox/xb-social.env
+Volume=%h/openpak/deploy/xbox/pki/social:/run/xb:ro
+# Event cursor (events.cursor). Losing it is safe: xb-social restarts at the stream head.
+Volume=openpak-xb-social:/var/lib/xb-social:U
+
+[Service]
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=default.target

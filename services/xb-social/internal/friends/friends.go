@@ -81,6 +81,11 @@ func (s *Service) Friends(ctx context.Context, viewerXUID string) (List, error) 
 	if err != nil {
 		return List{}, err
 	}
+	return s.FriendsOf(ctx, account)
+}
+
+// FriendsOf is Friends for a core account the caller has already admitted.
+func (s *Service) FriendsOf(ctx context.Context, account string) (List, error) {
 	raw, err := s.Core.ListFriends(ctx, account)
 	if err != nil {
 		return List{}, ErrUnavailable

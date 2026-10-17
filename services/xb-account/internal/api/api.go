@@ -22,6 +22,7 @@ import (
 const (
 	Auth        = "spiffe://openpak/xb-auth"
 	Gateway     = "spiffe://openpak/xb-gateway"
+	Social      = "spiffe://openpak/xb-social"      // user/gamertag lookups only (peers, viewers)
 	Provisioner = "spiffe://openpak/xb-provisioner" // web approval side
 	Enroll      = "spiffe://openpak/xb-enroll"      // public device-pairing front; two routes only
 )
@@ -69,8 +70,8 @@ func HandlerFull(res xbaccountapi.Resolver, rev xbaccountapi.Revocations, keys x
 	}
 	// Device proof material goes to xb-auth only, never the gateway.
 	mux.Handle("GET /internal/v1/devices/{id}/key", Only(xbaccountapi.KeyHandler(keys), Auth))
-	mux.Handle("/internal/v1/users/", Only(xbaccountapi.Handler(res, rev), Auth, Gateway))
-	mux.Handle("/internal/v1/gamertags/", Only(xbaccountapi.Handler(res, rev), Auth, Gateway))
+	mux.Handle("/internal/v1/users/", Only(xbaccountapi.Handler(res, rev), Auth, Gateway, Social))
+	mux.Handle("/internal/v1/gamertags/", Only(xbaccountapi.Handler(res, rev), Auth, Gateway, Social))
 	mux.Handle("/internal/v1/devices/", Only(xbaccountapi.Handler(res, rev), Auth, Gateway))
 	mux.Handle("/internal/v1/revocations", Only(xbaccountapi.Handler(res, rev), Auth, Gateway))
 	mux.Handle("POST /internal/v1/provisions", Only(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

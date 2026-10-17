@@ -122,3 +122,18 @@ func TestWrongCoreKeyIsUnavailable(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestMapErrClasses(t *testing.T) {
+	for code, want := range map[codes.Code]error{
+		codes.NotFound: ErrNotFound, codes.InvalidArgument: ErrInvalid, codes.PermissionDenied: ErrDenied,
+		codes.FailedPrecondition: ErrConflict, codes.AlreadyExists: ErrConflict,
+		codes.Internal: ErrUnavailable, codes.DeadlineExceeded: ErrUnavailable, codes.Unauthenticated: ErrUnavailable,
+	} {
+		if got := mapErr(status.Error(code, "x")); got != want {
+			t.Errorf("%v: %v want %v", code, got, want)
+		}
+	}
+	if mapNil(nil) != nil {
+		t.Error("nil became an error")
+	}
+}

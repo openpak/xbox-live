@@ -91,6 +91,12 @@ func TestEnrolmentRoutesAuthorizePerCaller(t *testing.T) {
 		{"POST", "/internal/v1/enrolments/approve", "{}", Auth, true, 403},
 		{"POST", "/internal/v1/enrolments/approve", "{}", Gateway, true, 403},
 		{"POST", "/internal/v1/vouchers", "{}", Gateway, true, 403},
+		// xb-social may look up users and gamertags, nothing else.
+		{"GET", "/internal/v1/devices/0000001cbe991a14/key", "", Social, true, 403},
+		{"GET", "/internal/v1/devices/0000001cbe991a14", "", Social, true, 403},
+		{"GET", "/internal/v1/revocations?after=0", "", Social, true, 403},
+		{"POST", "/internal/v1/provisions", "{}", Social, true, 403},
+		{"POST", "/internal/v1/vouchers", "{}", Social, true, 403},
 		{"POST", "/internal/v1/enrolments/approve", "{}", Provisioner, false, 403}, // unverified chain
 		{"POST", "/internal/v1/enrolments", "{}", "", false, 403},                  // no TLS
 	} {

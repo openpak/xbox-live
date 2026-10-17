@@ -7,7 +7,7 @@ only supplies the files.
 
 ## Layout
 
-- `docker/` per-service Dockerfiles (`xb-gateway`, `xb-account`, `xb-auth`) and the image table. `xb-social` and later services are deliberately absent.
+- `docker/` per-service Dockerfiles (`xb-gateway`, `xb-account`, `xb-auth`) and the image table. `xb-social` has a Dockerfile, quadlet and env template but is not to be deployed until its wire handlers exist.
 - `quadlet/` Podman quadlet units (`openpak-xb-*.container`), same conventions as `servers/playfab/deploy`: `Network=openpak.network` on main, `%h/openpak/deploy/...` paths, `Restart=always`, `WantedBy=default.target`.
 - `env/` example configuration. Contains **no secrets**; every key, certificate and the ticket validation key is a file mounted read-only under `/run/xb`.
 

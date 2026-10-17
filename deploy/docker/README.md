@@ -7,7 +7,7 @@
 | xb-auth | Dockerfile.xb-auth | builds once `services/xb-auth/cmd/xb-auth` exists |
 | xb-enroll | Dockerfile.xb-enroll | builds from `services/xb-enroll`; template only, not deployed (public exposure is a decision) |
 | xb-tou | Dockerfile.xb-tou | builds from `services/xb-tou` |
-| xb-social | Dockerfile.xb-social | builds from `services/xb-social`; published by CI, not deployed |
+| xb-social | Dockerfile.xb-social | builds from `services/xb-social`; quadlet `openpak-xb-social.container` + `env/xb-social.env.example` are templates, NOT deployed until the native wire handlers exist |
 
 Later feature services (presence, matchmaking, stats, etc.) follow the same
 pattern: one image per service, no shared state in the gateway.
