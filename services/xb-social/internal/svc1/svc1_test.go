@@ -180,11 +180,18 @@ func TestAliveReplyReflectsRealRoster(t *testing.T) {
 		binary.LittleEndian.Uint32(out[4:]) != uint32(16+len(entry)) {
 		t.Fatalf("v=%d nb=%d % x", v, nb, out)
 	}
-	// Up-to-date console: version echoed, nothing resent.
+	// Console already holding our version: never the equal-version skip path;
+	// it gets the neighbouring version and the full list again.
 	_, out = e.do(t, info(xAlice), "xon/1", aliveFor(t, r.BuddyVersion, 0))
-	if v2, nb, _, _ := versions(out); v2 != r.BuddyVersion || nb != 0 || len(out) != 48 {
-		t.Fatalf("up to date: %d %d", v2, nb)
+	if v2, nb, _, _ := versions(out); v2 != r.BuddyVersion+1 || nb != 1 || string(out[presenceHeader+16:]) != string(entry) {
+		t.Fatalf("held version: %d %d", v2, nb)
 	}
+	// ...and again when it holds the neighbouring one.
+	_, out = e.do(t, info(xAlice), "xon/1", aliveFor(t, r.BuddyVersion+1, 0))
+	if v2, nb, _, _ := versions(out); v2 != r.BuddyVersion || nb != 1 {
+		t.Fatalf("alternate: %d %d", v2, nb)
+	}
+	// An empty roster with an empty console stays the plain stub reply.
 	// The console's 0xffffffff stamp (held list, forced resend) gets the full list.
 	_, out = e.do(t, info(xAlice), "xon/1", aliveFor(t, 0xffffffff, 0))
 	if _, nb, _, _ := versions(out); nb != 1 {

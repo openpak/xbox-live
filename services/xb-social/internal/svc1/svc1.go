@@ -467,8 +467,21 @@ func (s *Server) aliveReply(hdr [presenceHeader]byte, r *social.Roster, buddyVer
 	if lists == nil {
 		lists = WireLists{}
 	}
-	sendBuddies := r.BuddyVersion != buddyVer
-	sendBlocks := r.BlockVersion != blockVer
+	// The console skips a list whose reply version equals the one it holds. That
+	// path (and the 0xffffffff stamp it leaves behind) was seen to end in "Could
+	// not connect" when the Friends screen re-logged on, while a reply with a
+	// different version, parsed in full, always worked. So a non-empty list is
+	// never answered with the version the console already has: it gets the
+	// neighbouring version and the full list again (small, and idempotent).
+	buddyV, blockV := r.BuddyVersion, r.BlockVersion
+	if buddyV != 0 && buddyV == buddyVer {
+		buddyV = otherVersion(buddyV)
+	}
+	if blockV != 0 && blockV == blockVer {
+		blockV = otherVersion(blockV)
+	}
+	sendBuddies := buddyV != buddyVer
+	sendBlocks := blockV != blockVer
 	data, nb, nl, err := lists.AliveLists(r, sendBuddies, sendBlocks)
 	if err != nil {
 		return nil, err
@@ -477,9 +490,18 @@ func (s *Server) aliveReply(hdr [presenceHeader]byte, r *social.Roster, buddyVer
 	binary.LittleEndian.PutUint32(out[0:], msgAliveReply)
 	binary.LittleEndian.PutUint32(out[4:], uint32(16+len(data)))
 	copy(out[8:presenceHeader], hdr[8:]) // seq + SG address echoed
-	binary.LittleEndian.PutUint32(out[presenceHeader+4:], r.BuddyVersion)
+	binary.LittleEndian.PutUint32(out[presenceHeader+4:], buddyV)
 	binary.LittleEndian.PutUint16(out[presenceHeader+8:], nb)
-	binary.LittleEndian.PutUint32(out[presenceHeader+10:], r.BlockVersion)
+	binary.LittleEndian.PutUint32(out[presenceHeader+10:], blockV)
 	binary.LittleEndian.PutUint16(out[presenceHeader+14:], nl)
 	return append(out, data...), nil
+}
+
+// otherVersion returns a nonzero version next to v that the console rejects
+// as reserved never: not 0, and below 0xfffffffd.
+func otherVersion(v uint32) uint32 {
+	if v < 0xfffffffc {
+		return v + 1
+	}
+	return v - 1
 }
