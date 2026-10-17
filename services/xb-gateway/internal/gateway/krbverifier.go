@@ -5,6 +5,7 @@ package gateway
 import (
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"strconv"
 	"time"
 
@@ -35,8 +36,11 @@ func (v KrbVerifier) VerifyAPReq(apReq []byte, now time.Time) (*Identity, error)
 		return nil, ticketErr("ap-req parse or ticket version")
 	}
 	part, err := krb.OpenTicket(v.SGKeys, krb.UsageSGTicket, req.Ticket)
-	if err != nil || part.Flags&krb.FlagInvalid != 0 || part.Key.Type != krb.ETypeRC4HMAC {
-		return nil, ticketErr("ticket does not open under the sg keyring (kvno/key/flags)")
+	if err != nil {
+		return nil, ticketErr(openFailure(v.SGKeys, req.Ticket))
+	}
+	if part.Flags&krb.FlagInvalid != 0 || part.Key.Type != krb.ETypeRC4HMAC {
+		return nil, ticketErr("ticket flags or session key type")
 	}
 	sessionKey, err := krb.ToKey(part.Key.Value)
 	if err != nil {
@@ -101,4 +105,28 @@ func (v KrbVerifier) VerifyAPReq(apReq []byte, now time.Time) (*Identity, error)
 		return krb.MarshalAPRep(sealed), nil
 	}
 	return id, nil
+}
+
+// openFailure says why a ticket did not open: structure only (key version
+// present/known, encryption type, cipher length, parse error), never key bytes.
+func openFailure(ring *krb.Keyring, t krb.Ticket) string {
+	if t.Enc.KVNO == nil {
+		return fmt.Sprintf("ticket has no key version (etype %d, %d cipher bytes, vno %d)", t.Enc.EType, len(t.Enc.Cipher), t.VNO)
+	}
+	raw, ok := ring.Get(*t.Enc.KVNO)
+	if !ok {
+		return fmt.Sprintf("key version %d is not in the sg keyring (ids %v)", *t.Enc.KVNO, ring.IDs())
+	}
+	key, err := krb.ToKey(raw)
+	if err != nil {
+		return "sg key unusable"
+	}
+	plain, err := krb.Open(key, krb.UsageSGTicket, t.Enc)
+	if err != nil {
+		return fmt.Sprintf("ticket does not decrypt under key version %d (etype %d, %d cipher bytes)", *t.Enc.KVNO, t.Enc.EType, len(t.Enc.Cipher))
+	}
+	if _, err := krb.ParseEncTicketPart(plain); err != nil {
+		return fmt.Sprintf("ticket decrypts but its contents do not parse (%d bytes): %v", len(plain), err)
+	}
+	return "ticket open failed"
 }
