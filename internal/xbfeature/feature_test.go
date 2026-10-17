@@ -132,3 +132,53 @@ func TestStreamRoundTripAndGatewayOnly(t *testing.T) {
 	}
 	_ = io.EOF
 }
+
+// slow answers after a pause that outlives the client's half-close; it checks
+// its context the way a core call would.
+type slow struct{ err chan error }
+
+func (h slow) Serve(ctx context.Context, _ Info, c Conn) error {
+	if _, err := c.Recv(); err != nil {
+		return nil
+	}
+	time.Sleep(150 * time.Millisecond)
+	h.err <- ctx.Err()
+	return c.Send([]byte("reply"))
+}
+
+// The console's FIN right after its request (the gateway then closes the
+// stream) must not cancel the handler or lose the reply.
+func TestHalfCloseDoesNotCancelHandler(t *testing.T) {
+	for name, closer := range map[string]func(*Stream){"closesend": (*Stream).CloseSend, "close": (*Stream).Close} {
+		p := newPKI(t)
+		h := slow{make(chan error, 1)}
+		creds := credentials.NewTLS(&tls.Config{Certificates: []tls.Certificate{p.leaf(t, "spiffe://openpak/xb-social", true)},
+			ClientCAs: p.caPool, ClientAuth: tls.RequireAndVerifyClientCert, MinVersion: tls.VersionTLS13})
+		lis, _ := net.Listen("tcp", "127.0.0.1:0")
+		s := grpc.NewServer(grpc.Creds(creds))
+		Register(s, h)
+		go s.Serve(lis)
+		defer s.Stop()
+		got := make(chan []byte, 2)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		st, err := Open(ctx, dial(t, p, lis.Addr().String(), GatewayID), Info{PrincipalID: "p", XUID: 7, ServiceID: 1},
+			func(b []byte) error { got <- b; return nil }, func() {})
+		if err != nil {
+			t.Fatal(err)
+		}
+		st.Send([]byte("req"))
+		closer(st)
+		select {
+		case b := <-got:
+			if string(b) != "reply" {
+				t.Fatalf("%s: %q", name, b)
+			}
+		case <-time.After(3 * time.Second):
+			t.Fatalf("%s: reply lost after half-close", name)
+		}
+		if err := <-h.err; err != nil {
+			t.Fatalf("%s: handler context cancelled: %v", name, err)
+		}
+		cancel()
+	}
+}

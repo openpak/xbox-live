@@ -21,6 +21,7 @@ import (
 	"errors"
 	"io"
 	"sync"
+	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -134,7 +135,27 @@ func (s *server) connect(st grpc.ServerStream) error {
 	if err := c.Send(nil); err != nil { // ack
 		return err
 	}
-	return s.h.Serve(st.Context(), info, c)
+	// The console half-closing its TCP side right after a request is normal
+	// (HTTP/1.0), and the gateway may tear its side down at once. That must not
+	// cancel work in flight: the handler's context ends only when the handler
+	// returns or the gateway is really gone (a send fails). It is detached from
+	// the stream's cancellation; callers bound each backend call themselves.
+	ctx, cancel := context.WithCancel(context.WithoutCancel(st.Context()))
+	defer cancel()
+	return s.h.Serve(ctx, info, &cancelOnSendFail{c, cancel})
+}
+
+type cancelOnSendFail struct {
+	Conn
+	cancel context.CancelFunc
+}
+
+func (c *cancelOnSendFail) Send(b []byte) error {
+	err := c.Conn.Send(b)
+	if err != nil {
+		c.cancel()
+	}
+	return err
 }
 
 // ---- client (gateway side) ----
@@ -144,6 +165,8 @@ type Stream struct {
 	cs     grpc.ClientStream
 	cancel context.CancelFunc
 	mu     sync.Mutex
+	// finished closes when the reader has ended (stream over).
+	finished chan struct{}
 }
 
 // Open starts a stream and waits for the service's ack within ctx. onData and
@@ -155,7 +178,7 @@ func Open(ctx context.Context, cc *grpc.ClientConn, info Info, onData func([]byt
 		cancel()
 		return nil, err
 	}
-	s := &Stream{cs: cs, cancel: cancel}
+	s := &Stream{cs: cs, cancel: cancel, finished: make(chan struct{})}
 	raw, _ := json.Marshal(info)
 	if err := s.send(raw); err != nil {
 		cancel()
@@ -170,6 +193,7 @@ func Open(ctx context.Context, cc *grpc.ClientConn, info Info, onData func([]byt
 		}
 		acked <- nil
 		defer onClose()
+		defer close(s.finished)
 		for {
 			var m wrapperspb.BytesValue
 			if err := cs.RecvMsg(&m); err != nil {
@@ -202,10 +226,28 @@ func (s *Stream) send(b []byte) error {
 // Send forwards console bytes.
 func (s *Stream) Send(b []byte) error { return s.send(b) }
 
-// Close ends the connection.
-func (s *Stream) Close() {
+// CloseSend half-closes: no more console bytes, the service may still answer.
+func (s *Stream) CloseSend() {
 	s.mu.Lock()
 	s.cs.CloseSend()
 	s.mu.Unlock()
-	s.cancel()
 }
+
+// Close ends the connection gracefully: it half-closes and gives the service
+// up to CloseGrace to finish and send its reply before the stream is cancelled
+// (a request followed at once by the console's FIN must still be answered).
+func (s *Stream) Close() {
+	s.CloseSend()
+	t := time.AfterFunc(CloseGrace, s.cancel)
+	go func() {
+		<-s.finished
+		t.Stop()
+		s.cancel()
+	}()
+}
+
+// Abort cancels the stream immediately, dropping any reply.
+func (s *Stream) Abort() { s.CloseSend(); s.cancel() }
+
+// CloseGrace bounds how long Close waits for the service to finish.
+var CloseGrace = 10 * time.Second
