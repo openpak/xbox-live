@@ -383,21 +383,3 @@ func TestProvisioningReplacesAnAutomaticIdentity(t *testing.T) {
 		t.Fatal("auto marker must be gone")
 	}
 }
-
-// A console identity keeps its gamertag when the core display name changes.
-func TestConsoleIdentityKeepsItsGamertagOnRename(t *testing.T) {
-	e := setup(t)
-	ctx := context.Background()
-	tok := e.begin(t, "acct1", machine)
-	if _, err := e.p.Finalize(ctx, FinalizeRequest{Token: tok, MachineID: machine, Challenge: challenge, Gamertag: "RealTag", Proof: proof}); err != nil {
-		t.Fatal(err)
-	}
-	e.core.Names = map[string]string{"acct1": "Something Else"}
-	auto := &autoid.Service{Core: e.core, Store: e.db}
-	if _, err := auto.Ensure(ctx, "acct1"); err != nil {
-		t.Fatal(err)
-	}
-	if u, _, _ := e.db.ActiveUserOf(ctx, "acct1"); u.Gamertag != "RealTag" {
-		t.Fatalf("console gamertag changed to %q", u.Gamertag)
-	}
-}

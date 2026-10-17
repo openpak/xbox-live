@@ -106,3 +106,37 @@ func (s *Store) RenameUser(ctx context.Context, xuid, oldTag, newTag string) err
 		return err
 	})
 }
+
+// GamertagAudit is one recorded gamertag change.
+type GamertagAudit struct {
+	XUID, Old, New, RequestID string
+}
+
+// AuditByRequest returns the change recorded for a request id (idempotent replay).
+func (s *Store) AuditByRequest(ctx context.Context, account, requestID string) (GamertagAudit, bool, error) {
+	var a GamertagAudit
+	err := s.db.QueryRowContext(ctx, `SELECT xuid,old_tag,new_tag,request_id FROM gamertag_audit WHERE request_id=? AND core_account_id=?`, requestID, account).
+		Scan(&a.XUID, &a.Old, &a.New, &a.RequestID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return GamertagAudit{}, false, nil
+	}
+	return a, err == nil, err
+}
+
+// RenameUserAudited is RenameUser plus the audit row, atomically.
+func (s *Store) RenameUserAudited(ctx context.Context, account, xuid, oldTag, newTag, requestID, actor string) error {
+	n := s.unix()
+	return s.tx(ctx, func(t *sql.Tx) error {
+		if _, err := t.ExecContext(ctx, `DELETE FROM gamertag_aliases WHERE xuid=? AND alias_lower=?`, xuid, strings.ToLower(oldTag)); err != nil {
+			return err
+		}
+		if _, err := t.ExecContext(ctx, `INSERT INTO gamertag_aliases(alias_lower,xuid,created) VALUES(?,?,?)`, strings.ToLower(newTag), xuid, n); err != nil {
+			return conflict(err)
+		}
+		if _, err := t.ExecContext(ctx, `UPDATE users SET gamertag=?,updated=? WHERE xuid=?`, newTag, n, xuid); err != nil {
+			return err
+		}
+		_, err := t.ExecContext(ctx, `INSERT INTO gamertag_audit(ts,core_account_id,xuid,old_tag,new_tag,request_id,actor) VALUES(?,?,?,?,?,?,?)`, n, account, xuid, oldTag, newTag, requestID, actor)
+		return conflict(err)
+	})
+}

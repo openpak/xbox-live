@@ -15,6 +15,7 @@ import (
 
 	"openpak/xb-live/internal/xbaccountapi"
 	"openpak/xb-live/services/xb-account/internal/enrol"
+	"openpak/xb-live/services/xb-account/internal/profile"
 	"openpak/xb-live/services/xb-account/internal/provision"
 	"openpak/xb-live/services/xb-account/internal/voucher"
 )
@@ -60,8 +61,11 @@ func Handler(res xbaccountapi.Resolver, rev xbaccountapi.Revocations, keys xbacc
 
 // HandlerFull is Handler plus the device-pairing enrolment and subscription
 // code routes (see enrol.go); either may be nil to leave its routes unmounted.
-func HandlerFull(res xbaccountapi.Resolver, rev xbaccountapi.Revocations, keys xbaccountapi.DeviceKeys, prov *provision.Provisioner, enr *enrol.Service, vch *voucher.Service) http.Handler {
+func HandlerFull(res xbaccountapi.Resolver, rev xbaccountapi.Revocations, keys xbaccountapi.DeviceKeys, prov *provision.Provisioner, enr *enrol.Service, vch *voucher.Service, opts ...Option) http.Handler {
 	mux := http.NewServeMux()
+	for _, o := range opts {
+		o(mux)
+	}
 	if enr != nil {
 		mountEnrol(mux, enr)
 	}
@@ -148,5 +152,50 @@ func fail(w http.ResponseWriter, err error) {
 		http.Error(w, "provisioning failed", 422)
 	default:
 		http.Error(w, "unavailable", 503)
+	}
+}
+
+// Option mounts extra routes on the handler.
+type Option func(*http.ServeMux)
+
+// WithProfile mounts POST /internal/v1/accounts/{account}/gamertag for the web
+// approval side (Provisioner identity only; a console never reaches it).
+func WithProfile(p *profile.Service) Option {
+	return func(mux *http.ServeMux) {
+		mux.Handle("POST /internal/v1/accounts/{account}/gamertag", Only(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var req struct {
+				Gamertag             string `json:"gamertag"`
+				RequestID            string `json:"request_id"`
+				Actor                string `json:"actor"`
+				ForceConsoleIdentity bool   `json:"force_console_identity"`
+			}
+			if !decode(w, r, &req) {
+				return
+			}
+			res, err := p.SetGamertag(r.Context(), profile.Request{Account: r.PathValue("account"), Gamertag: req.Gamertag,
+				RequestID: req.RequestID, Actor: req.Actor, ForceConsoleIdentity: req.ForceConsoleIdentity})
+			if err != nil {
+				var code, msg = 503, "unavailable"
+				switch {
+				case errors.Is(err, profile.ErrInvalid):
+					code, msg = 400, "invalid_gamertag"
+				case errors.Is(err, profile.ErrReserved):
+					code, msg = 422, "reserved_gamertag"
+				case errors.Is(err, profile.ErrTaken):
+					code, msg = 409, "gamertag_taken"
+				case errors.Is(err, profile.ErrConsoleBound):
+					code, msg = 409, "console_bound"
+				case errors.Is(err, profile.ErrRequestReplay):
+					code, msg = 409, "request_id_reused"
+				case errors.Is(err, profile.ErrNoIdentity):
+					code, msg = 404, "no_xbox_identity"
+				}
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(code)
+				json.NewEncoder(w).Encode(map[string]string{"error": msg})
+				return
+			}
+			reply(w, map[string]any{"xuid": res.XUID, "gamertag": res.Gamertag, "previous": res.Previous, "changed": res.Changed})
+		}), Provisioner))
 	}
 }

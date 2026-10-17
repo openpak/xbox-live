@@ -27,6 +27,7 @@ import (
 	"openpak/xb-live/services/xb-account/internal/autoid"
 	"openpak/xb-live/services/xb-account/internal/core"
 	"openpak/xb-live/services/xb-account/internal/enrol"
+	"openpak/xb-live/services/xb-account/internal/profile"
 	"openpak/xb-live/services/xb-account/internal/provision"
 	"openpak/xb-live/services/xb-account/internal/resolver"
 	"openpak/xb-live/services/xb-account/internal/revoke"
@@ -130,7 +131,7 @@ func run() error {
 	legacy := api.Only(adapter.Handler(adapter.NewCore(conn, coreKey)), api.Auth, api.Gateway)
 	mux.Handle("/internal/v1/resolve", legacy)
 	mux.Handle("/livez", legacy)
-	mux.Handle("/", api.HandlerFull(res, res, res, prov, enrolments, vouchers))
+	mux.Handle("/", api.HandlerFull(res, res, res, prov, enrolments, vouchers, api.WithProfile(&profile.Service{Core: coreAPI, Store: db})))
 	handler := http.Handler(mux)
 	addr := required("XB_LISTEN_ADDR")
 	server := &http.Server{Addr: addr, Handler: handler, TLSConfig: cfg, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 5 * time.Second, WriteTimeout: 35 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 8192}
