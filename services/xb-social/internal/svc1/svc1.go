@@ -88,7 +88,13 @@ type Server struct {
 	// per-request HTTP/1.0 connections, which close after every reply.
 	OfflineOnClose bool
 	Others         map[uint32]xbfeature.Handler
-	Now            func() time.Time
+	// RosterMode narrows what AliveReply carries, to find which entry kind a
+	// console rejects: "" or "all", "empty", "friends", "requests" (friends
+	// omitted), "blocks". Debug aid only.
+	RosterMode string
+	// DebugHex logs every AliveReply as hex (XUIDs and gamertags only).
+	DebugHex bool
+	Now      func() time.Time
 
 	mu      sync.Mutex
 	buckets map[uint64]*bucket
@@ -399,6 +405,16 @@ func (s *Server) alive(ctx context.Context, c Call, msgs [][]byte) (result, erro
 	if err != nil {
 		return result{}, err
 	}
+	switch s.RosterMode {
+	case "empty":
+		roster.Filter(false, false, false)
+	case "friends":
+		roster.Filter(true, false, false)
+	case "requests":
+		roster.Filter(false, true, false)
+	case "blocks":
+		roster.Filter(false, false, true)
+	}
 	var out []byte
 	for _, p := range ps {
 		r, err := s.aliveReply(p.hdr, roster, p.buddyV, p.blockV)
@@ -406,6 +422,12 @@ func (s *Server) alive(ctx context.Context, c Call, msgs [][]byte) (result, erro
 			return result{}, err
 		}
 		out = append(out, r...)
+		bv, nb, kv, nl := binary.LittleEndian.Uint32(r[presenceHeader+4:]), binary.LittleEndian.Uint16(r[presenceHeader+8:]),
+			binary.LittleEndian.Uint32(r[presenceHeader+10:]), binary.LittleEndian.Uint16(r[presenceHeader+14:])
+		log.Printf("svc1: AliveReply mode=%q client_versions=%d/%d reply buddies=%d@%d blocks=%d@%d bytes=%d", s.RosterMode, p.buddyV, p.blockV, nb, bv, nl, kv, len(r))
+		if s.DebugHex {
+			log.Printf("svc1: AliveReply hex=%x", r)
+		}
 	}
 	return result{body: out}, nil
 }

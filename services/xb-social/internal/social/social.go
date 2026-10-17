@@ -342,6 +342,34 @@ func (s *Service) RosterOf(ctx context.Context, account string) (*Roster, error)
 	return r, nil
 }
 
+// Filter drops the parts of the roster the flags leave out and recomputes the
+// versions, for isolating which kind of entry a console rejects.
+func (r *Roster) Filter(keepFriends, requests, blocks bool) {
+	if !keepFriends {
+		r.Friends = []friends.Friend{}
+	}
+	if !requests {
+		r.Incoming, r.Outgoing = []Contact{}, []Contact{}
+	}
+	if !blocks {
+		r.Blocked = []Contact{}
+	}
+	var buddy, block []string
+	for _, f := range r.Friends {
+		buddy = append(buddy, "f"+f.XUID+f.Gamertag)
+	}
+	for _, c := range r.Incoming {
+		buddy = append(buddy, "i"+c.XUID+c.Gamertag)
+	}
+	for _, c := range r.Outgoing {
+		buddy = append(buddy, "o"+c.XUID+c.Gamertag)
+	}
+	for _, c := range r.Blocked {
+		block = append(block, "b"+c.XUID+c.Gamertag)
+	}
+	r.BuddyVersion, r.BlockVersion = version(buddy), version(block)
+}
+
 func dedupe(in []string) []string {
 	seen := map[string]bool{}
 	var out []string
@@ -369,8 +397,10 @@ func version(parts []string) uint32 {
 	switch v := h.Sum32(); v {
 	case 0:
 		return 1
-	case 0xffffffff: // the console stamps a held list 0xffffffff to force a resend
-		return 0xfffffffe
+	case 0xfffffffd, 0xfffffffe, 0xffffffff:
+		// 0xffffffff is the console's own "force a resend" stamp, and it rejects
+		// a list whose version is -1 or -2 (validation in the AliveReply parser).
+		return 0xfffffffc
 	default:
 		return v
 	}

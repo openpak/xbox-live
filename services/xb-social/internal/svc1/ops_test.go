@@ -188,3 +188,59 @@ func TestInviteOperationsAndNotificationPoll(t *testing.T) {
 		t.Fatalf("foreign poll %q", code)
 	}
 }
+
+// Pins the exact AliveReply bytes for a roster of one friend (xbtest2, status 0),
+// one received request (xbtest3, status 2) and no blocks, and checks them with
+// an independent re-implementation of the console's parser (decompile of the
+// dashboard's list reader: 11-byte entry header, name_len <= 16, status 0/1/2,
+// xuid and first name byte non-zero, <= 100 entries, payload ends the message).
+func TestAliveReplyBytesMatchConsoleParser(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	e.c.AddAccount("carol", "carol")
+	e.c.LinkXbox("carol", "00090243645ad44d", "xbtest3")
+	e.c.AddAccount("dave", "dave")
+	e.c.LinkXbox("dave", "00095feff338cc25", "xbtest2")
+	a := fmt.Sprintf("%016x", xAlice)
+	e.srv.Social.SendFriendRequest(ctx, "00095feff338cc25", "", a)
+	e.srv.Social.AcceptFriendRequest(ctx, a, "", "00095feff338cc25")
+	e.srv.Social.SendFriendRequest(ctx, "00090243645ad44d", "", a)
+	code, out := e.do(t, info(xAlice), "xon/1", aliveFor(t, 0, 0))
+	if code != "HTTP/1.0 200 OK X-Err:0" {
+		t.Fatal(code)
+	}
+	t.Logf("AliveReply hex: %x", out)
+	if binary.LittleEndian.Uint32(out[4:]) != uint32(len(out)-presenceHeader) {
+		t.Fatal("length field")
+	}
+	if int32(binary.LittleEndian.Uint32(out[presenceHeader:])) != 0 {
+		t.Fatal("HR")
+	}
+	ver := binary.LittleEndian.Uint32(out[presenceHeader+4:])
+	n := int(binary.LittleEndian.Uint16(out[presenceHeader+8:]))
+	if ver == 0xffffffff || ver == 0xfffffffe || ver == 0 || n != 2 || n > 100 {
+		t.Fatalf("version %d count %d", ver, n)
+	}
+	p := out[presenceHeader+16:]
+	want := []struct {
+		x    uint64
+		name string
+		st   byte
+	}{{0x00095feff338cc25, "xbtest2", 0}, {0x00090243645ad44d, "xbtest3", 2}}
+	for i := 0; i < n; i++ {
+		if len(p) < 11 {
+			t.Fatal("short entry header")
+		}
+		x, l, st := binary.LittleEndian.Uint64(p), int(binary.LittleEndian.Uint16(p[8:])), p[10]
+		if x == 0 || l < 1 || l > 16 || st > 2 || len(p) < 11+l || p[11] == 0 {
+			t.Fatalf("entry %d rejected by console rules: % x", i, p)
+		}
+		if x != want[i].x || string(p[11:11+l]) != want[i].name || st != want[i].st {
+			t.Fatalf("entry %d: %x %q %d", i, x, p[11:11+l], st)
+		}
+		p = p[11+l:]
+	}
+	if len(p) != 0 || binary.LittleEndian.Uint16(out[presenceHeader+14:]) != 0 {
+		t.Fatalf("trailing % x", p)
+	}
+}
