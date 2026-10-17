@@ -4,6 +4,7 @@ package svc1
 
 import (
 	"context"
+	"log"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -123,6 +124,9 @@ func (s *Server) operation(ctx context.Context, c Call, typ uint32, msg []byte) 
 // reveal more than the console may know (a block, a policy refusal) read as
 // "not found".
 func opResult(err error) (result, error) {
+	if err != nil {
+		log.Printf("svc1: operation refused: %v", err)
+	}
 	switch {
 	case err == nil:
 		return result{}, nil
