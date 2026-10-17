@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"hash/fnv"
+	"log"
 	"sort"
 	"sync"
 	"time"
@@ -149,6 +150,7 @@ func (s *Service) Actor(ctx context.Context, viewerXUID, gatewayAccount string) 
 	case errors.Is(err, xbaccountapi.ErrDenied), errors.Is(err, xbaccountapi.ErrNotFound), errors.Is(err, xbaccountapi.ErrInvalid):
 		return "", ErrDenied
 	default:
+		log.Printf("social: resolve viewer: %v", err)
 		return "", ErrUnavailable
 	}
 	if p.CoreAccountID == "" || p.Kind != xbaccountapi.KindUser || p.PrincipalID != viewerXUID || (gatewayAccount != "" && gatewayAccount != p.CoreAccountID) {
@@ -168,6 +170,7 @@ func (s *Service) peer(ctx context.Context, actor, xuid string) (string, error) 
 	case errors.Is(err, xbaccountapi.ErrDenied), errors.Is(err, xbaccountapi.ErrNotFound), errors.Is(err, xbaccountapi.ErrInvalid):
 		return "", ErrUnknownUser
 	default:
+		log.Printf("social: resolve peer: %v", err)
 		return "", ErrUnavailable
 	}
 	if p.CoreAccountID == "" || p.PrincipalID != xuid {

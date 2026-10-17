@@ -189,7 +189,7 @@ func workloadTLS(pool *x509.CertPool) *tls.Config {
 			}
 			for _, uri := range state.PeerCertificates[0].URIs {
 				// Per-route authorization (internal/api) narrows this further.
-				if u := uri.String(); u == api.Auth || u == api.Gateway || u == api.Provisioner || u == api.Enroll {
+				if u := uri.String(); u == api.Auth || u == api.Gateway || u == api.Social || u == api.Provisioner || u == api.Enroll {
 					return nil
 				}
 			}
