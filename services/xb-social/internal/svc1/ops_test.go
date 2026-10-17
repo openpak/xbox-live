@@ -244,3 +244,24 @@ func TestAliveReplyBytesMatchConsoleParser(t *testing.T) {
 		t.Fatalf("trailing % x", p)
 	}
 }
+
+func TestStubModes(t *testing.T) {
+	in := aliveFor(t, 0, 0)
+	e := newEnv(t)
+	e.srv.Stub = true
+	code, out := e.do(t, info(xAlice), "xon/1", in)
+	want := append(append([]byte(nil), 0x4d, 4, 0, 0, 0x10, 0, 0, 0), in[8:32]...)
+	want = append(want, make([]byte, 16)...)
+	if code != "HTTP/1.0 200 OK X-Err:0" || string(out) != string(want) {
+		t.Fatalf("%q % x", code, out)
+	}
+	if len(e.c.Calls) != 0 || len(e.c.Sessions("alice")) != 0 {
+		t.Fatalf("stub mode touched core: %v", e.c.Calls)
+	}
+	e = newEnv(t)
+	e.srv.StubWork = true
+	code, out = e.do(t, info(xAlice), "xon/1", in)
+	if code != "HTTP/1.0 200 OK X-Err:0" || string(out) != string(want) || len(e.c.Sessions("alice")) != 1 {
+		t.Fatalf("stubwork: %q % x %v", code, out, e.c.Sessions("alice"))
+	}
+}

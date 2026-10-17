@@ -92,6 +92,13 @@ type Server struct {
 	// console rejects: "" or "all", "empty", "friends", "requests" (friends
 	// omitted), "blocks". Debug aid only.
 	RosterMode string
+	// Stub answers every Alive with an empty AliveReply immediately: no core
+	// call, no presence, exactly what the xb-account stub did. StubWork does
+	// the admission, presence publish and roster load first and then discards
+	// the result for the same empty reply. StubDelay waits before replying.
+	// Bisect aids only.
+	Stub, StubWork bool
+	StubDelay      time.Duration
 	// DebugHex logs every AliveReply as hex (XUIDs and gamertags only).
 	DebugHex bool
 	Now      func() time.Time
@@ -387,6 +394,23 @@ func (s *Server) alive(ctx context.Context, c Call, msgs [][]byte) (result, erro
 		copy(p.hdr[:], m)
 		ps = append(ps, p)
 	}
+	// The xb-account stub's reply: empty lists, version 0, no core involved.
+	stub := func() (result, error) {
+		time.Sleep(s.StubDelay)
+		var out []byte
+		for _, p := range ps {
+			r, err := s.aliveReply(p.hdr, &social.Roster{}, p.buddyV, p.blockV)
+			if err != nil {
+				return result{}, err
+			}
+			out = append(out, r...)
+		}
+		log.Printf("svc1: STUB AliveReply bytes=%d delay=%s work=%v", len(out), s.StubDelay, s.StubWork)
+		return result{body: out}, nil
+	}
+	if s.Stub {
+		return stub()
+	}
 	// Admit first (banned/unlinked users publish nothing), then publish, then
 	// read the roster the reply describes.
 	account, err := s.Social.Actor(ctx, c.XUID, c.Info.CoreAccountID)
@@ -404,6 +428,9 @@ func (s *Server) alive(ctx context.Context, c Call, msgs [][]byte) (result, erro
 	roster, err := s.Social.RosterOf(ctx, account)
 	if err != nil {
 		return result{}, err
+	}
+	if s.StubWork {
+		return stub()
 	}
 	switch s.RosterMode {
 	case "empty":

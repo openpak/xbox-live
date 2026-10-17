@@ -176,7 +176,15 @@ func startFeature(ctx context.Context, addr string, backend core.Backend, accoun
 	hub := &social.Hub{}
 	soc := &social.Service{Core: backend, Resolver: accounts, Presence: presence, Hub: hub}
 	srv := &svc1.Server{Social: soc, Presence: presence, TTL: ttl, OfflineOnClose: os.Getenv("XB_PRESENCE_OFFLINE_ON_CLOSE") == "1",
-		RosterMode: os.Getenv("XB_SOCIAL_ROSTER_MODE"), DebugHex: os.Getenv("XB_SOCIAL_DEBUG_HEX") == "1"}
+		RosterMode: os.Getenv("XB_SOCIAL_ROSTER_MODE"), DebugHex: os.Getenv("XB_SOCIAL_DEBUG_HEX") == "1",
+		Stub: os.Getenv("XB_SOCIAL_MODE_STUB") == "1", StubWork: os.Getenv("XB_SOCIAL_MODE_STUBWORK") == "1"}
+	if v := os.Getenv("XB_SOCIAL_STUB_DELAY_MS"); v != "" {
+		ms, err := strconv.Atoi(v)
+		if err != nil || ms < 0 || ms > 5000 {
+			return nil, errors.New("XB_SOCIAL_STUB_DELAY_MS must be 0-5000")
+		}
+		srv.StubDelay = time.Duration(ms) * time.Millisecond
+	}
 	// Friend/invite operations, the notification poll and AliveReply lists are
 	// built in (docs/xbox/social-protocol.md). Messaging (service 18) and the
 	// gateway UDP push (social.PushSource -> 0x5309) are not wired: no push
