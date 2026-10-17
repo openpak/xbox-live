@@ -26,6 +26,7 @@ import (
 	"openpak/xb-live/services/xb-account/internal/api"
 	"openpak/xb-live/services/xb-account/internal/core"
 	"openpak/xb-live/services/xb-account/internal/enrol"
+	"openpak/xb-live/services/xb-account/internal/projection"
 	"openpak/xb-live/services/xb-account/internal/provision"
 	"openpak/xb-live/services/xb-account/internal/resolver"
 	"openpak/xb-live/services/xb-account/internal/revoke"
@@ -112,6 +113,8 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
 	go (&revoke.Processor{Core: coreAPI, Store: db}).Run(ctx, 2*time.Second)
+	// Every active core account gets an "xbox" link, console or not.
+	go projection.Run(ctx, coreAPI, time.Minute)
 	go func() {
 		for ctx.Err() == nil {
 			prov.Reap(ctx)

@@ -15,6 +15,7 @@ import (
 	"openpak/xb-live/internal/xbaccountapi"
 	"openpak/xb-live/internal/xbcrypto"
 	"openpak/xb-live/services/xb-account/internal/core"
+	"openpak/xb-live/services/xb-account/internal/projection"
 	"openpak/xb-live/services/xb-account/internal/store"
 )
 
@@ -127,7 +128,7 @@ func (r *Resolver) ResolveDevice(ctx context.Context, machineID string) (xbaccou
 		return xbaccountapi.Principal{}, denied(xbaccountapi.KindDevice, machineID, d.CoreAccountID, d.Status)
 	}
 	// A device is only as good as the account's Xbox link: no active link, no admission.
-	if _, err := r.Core.GetActiveLinkByAccount(ctx, d.CoreAccountID); errors.Is(err, core.ErrNotFound) {
+	if l, err := r.Core.GetActiveLinkByAccount(ctx, d.CoreAccountID); errors.Is(err, core.ErrNotFound) || err == nil && projection.Is(l.SubjectID) {
 		return xbaccountapi.Principal{}, denied(xbaccountapi.KindDevice, machineID, d.CoreAccountID, xbaccountapi.StatusUnlinked)
 	} else if err != nil {
 		return xbaccountapi.Principal{}, coreErr(err)

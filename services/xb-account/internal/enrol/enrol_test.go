@@ -18,6 +18,7 @@ import (
 	"openpak/xb-live/services/xb-account/internal/core"
 	pb "openpak/xb-live/services/xb-account/internal/corepb"
 	"openpak/xb-live/services/xb-account/internal/coretest"
+	"openpak/xb-live/services/xb-account/internal/projection"
 	"openpak/xb-live/services/xb-account/internal/store"
 	"openpak/xb-live/services/xb-account/internal/voucher"
 )
@@ -465,5 +466,49 @@ func TestRevocationCoversEnrolledDevices(t *testing.T) {
 				t.Fatalf("re-enrol after revoke: %v", err)
 			}
 		})
+	}
+}
+
+func TestProjectionLinkThenRealEnrolmentAdopts(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	// acct1 fails once in the pass; acct2 must still be projected.
+	reserves := 0
+	e.core.Fail = func(op string) error {
+		if op == "ReserveLink" {
+			reserves++
+		}
+		if op == "ReserveLink" && reserves == 1 {
+			return core.ErrUnavailable
+		}
+		return nil
+	}
+	created, failed, err := projection.Pass(ctx, e.core)
+	if err != nil || created != 1 || failed != 1 {
+		t.Fatalf("first pass: %d %d %v", created, failed, err)
+	}
+	e.core.Fail = nil
+	if created, failed, err = projection.Pass(ctx, e.core); err != nil || created != 1 || failed != 0 {
+		t.Fatalf("second pass: %d %d %v", created, failed, err)
+	}
+	if created, _, _ = projection.Pass(ctx, e.core); created != 0 {
+		t.Fatal("pass is not idempotent")
+	}
+	l, err := e.core.GetActiveLinkByAccount(ctx, "acct1")
+	if err != nil || !projection.Is(l.SubjectID) || l.PublicCode != "" {
+		t.Fatalf("projection %+v %v", l, err)
+	}
+	// The projection is not a console: a real enrolment replaces it.
+	r := e.enrol(t, machine)
+	if _, err := e.s.Approve(ctx, "acct1", r.PairingCode); err != nil {
+		t.Fatalf("approve over projection: %v", err)
+	}
+	d, err := e.db.GetDevice(ctx, machine)
+	l, _ = e.core.GetActiveLinkByAccount(ctx, "acct1")
+	if err != nil || projection.Is(l.SubjectID) || l.SubjectID != d.XUID {
+		t.Fatalf("link not adopted: %+v %+v %v", l, d, err)
+	}
+	if created, _, _ = projection.Pass(ctx, e.core); created != 0 {
+		t.Fatal("projection re-created beside a real link")
 	}
 }

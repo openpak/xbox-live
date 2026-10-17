@@ -7,6 +7,7 @@ package coretest
 
 import (
 	"context"
+	"sort"
 	"strings"
 	"sync"
 
@@ -242,4 +243,24 @@ func (c *Core) SetLinkState(id string, st pb.LinkState) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.links[id].state = st
+}
+
+// ListAccounts pages active accounts in id order, like core's keyset listing.
+func (c *Core) ListAccounts(_ context.Context, after string, limit int) ([]string, string, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if err := c.begin("ListAccounts"); err != nil {
+		return nil, "", err
+	}
+	var all []string
+	for id, st := range c.Accounts {
+		if st == pb.AccountStatus_ACCOUNT_STATUS_ACTIVE && id > after {
+			all = append(all, id)
+		}
+	}
+	sort.Strings(all)
+	if limit > 0 && len(all) > limit {
+		return all[:limit], all[limit-1], nil
+	}
+	return all, "", nil
 }

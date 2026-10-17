@@ -54,6 +54,8 @@ type API interface {
 	UnlinkLink(ctx context.Context, linkID, idem string) error
 	SetLinkPublicCode(ctx context.Context, linkID, code string) error
 	PollEvents(ctx context.Context, since uint64, limit int) ([]Event, error)
+	// ListAccounts pages active accounts by keyset (after = last id of the previous page; next "" at the end).
+	ListAccounts(ctx context.Context, after string, limit int) (ids []string, next string, err error)
 }
 
 type Client struct {
@@ -179,4 +181,18 @@ func (c *Client) PollEvents(p context.Context, since uint64, limit int) ([]Event
 		out = append(out, Event{e.Version, e.EventId, e.Type, e.AccountId, e.Namespace, e.SubjectId, e.CreatedAtUnix})
 	}
 	return out, nil
+}
+
+func (c *Client) ListAccounts(p context.Context, after string, limit int) ([]string, string, error) {
+	ctx, cancel := c.ctx(p)
+	defer cancel()
+	r, err := c.identity.ListAccounts(ctx, &pb.ListAccountsRequest{AfterAccountId: after, Limit: int32(limit)})
+	if err != nil {
+		return nil, "", mapErr(err)
+	}
+	ids := make([]string, 0, len(r.Accounts))
+	for _, a := range r.Accounts {
+		ids = append(ids, a.AccountId)
+	}
+	return ids, r.NextAfterAccountId, nil
 }

@@ -32,6 +32,7 @@ import (
 
 	"openpak/xb-live/internal/xbaccountapi"
 	"openpak/xb-live/services/xb-account/internal/core"
+	"openpak/xb-live/services/xb-account/internal/projection"
 	"openpak/xb-live/services/xb-account/internal/store"
 )
 
@@ -112,9 +113,9 @@ func (p *Provisioner) Begin(ctx context.Context, r BeginRequest) (token string, 
 	if err != nil {
 		return "", time.Time{}, ErrUnavailable
 	}
-	if _, err := p.Core.GetActiveLinkByAccount(ctx, r.CoreAccountID); err == nil {
+	if l, err := p.Core.GetActiveLinkByAccount(ctx, r.CoreAccountID); err == nil && !projection.Is(l.SubjectID) {
 		return "", time.Time{}, ErrAlreadyLinked
-	} else if !errors.Is(err, core.ErrNotFound) {
+	} else if err != nil && !errors.Is(err, core.ErrNotFound) {
 		return "", time.Time{}, ErrUnavailable
 	}
 	if bound, err := p.Store.DeviceBoundElsewhere(ctx, r.MachineID, r.CoreAccountID); err != nil {
@@ -277,6 +278,10 @@ func (p *Provisioner) advance(ctx context.Context, rec *store.Provision) error {
 		return nil
 	}
 	if rec.State == store.ProvClaimed {
+		defer projection.Lock()()
+		if projection.Release(ctx, p.Core, rec.CoreAccountID) != nil {
+			return ErrUnavailable
+		}
 		// One primary Xbox user per account, enforced in core before reserving.
 		if l, err := p.Core.GetActiveLinkByAccount(ctx, rec.CoreAccountID); err == nil {
 			if l.SubjectID != rec.XUID {

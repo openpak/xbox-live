@@ -40,6 +40,7 @@ import (
 	"openpak/xb-live/internal/xbcodes"
 	"openpak/xb-live/internal/xbenrolapi"
 	"openpak/xb-live/services/xb-account/internal/core"
+	"openpak/xb-live/services/xb-account/internal/projection"
 	"openpak/xb-live/services/xb-account/internal/store"
 	"openpak/xb-live/services/xb-account/internal/voucher"
 )
@@ -321,9 +322,9 @@ func (s *Service) Approve(ctx context.Context, account, typed string) (Approval,
 		if err != nil {
 			return Approval{}, ErrUnavailable
 		}
-		if _, err := s.Core.GetActiveLinkByAccount(ctx, account); err == nil {
+		if l, err := s.Core.GetActiveLinkByAccount(ctx, account); err == nil && !projection.Is(l.SubjectID) {
 			return Approval{}, ErrConflict
-		} else if !errors.Is(err, core.ErrNotFound) {
+		} else if err != nil && !errors.Is(err, core.ErrNotFound) {
 			return Approval{}, ErrUnavailable
 		}
 		if d, err := s.Store.GetDevice(ctx, e.MachineID); err == nil && (d.Status == xbaccountapi.StatusActive || d.Status == xbaccountapi.StatusBanned) {
@@ -383,6 +384,12 @@ func (s *Service) advance(ctx context.Context, e *store.Enrolment) error {
 		return nil
 	}
 	if e.State == store.EnrolApproving {
+		// The console-less projection link yields to the real one; the gate keeps
+		// the reconciler from re-creating it before we reserve.
+		defer projection.Lock()()
+		if projection.Release(ctx, s.Core, e.CoreAccountID) != nil {
+			return ErrUnavailable
+		}
 		if l, err := s.Core.GetActiveLinkByAccount(ctx, e.CoreAccountID); err == nil {
 			if l.SubjectID != e.XUID {
 				return s.fail(ctx, e, "account already linked", ErrConflict)
