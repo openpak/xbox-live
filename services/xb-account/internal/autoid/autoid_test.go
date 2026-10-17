@@ -161,3 +161,42 @@ func TestReleaseRetiresAndFreesTheGamertag(t *testing.T) {
 		t.Fatalf("re-ensure xuid %s", u.XUID)
 	}
 }
+
+func TestRenameFollowsCoreForCredentialLessIdentities(t *testing.T) {
+	s, c, db := setup(t)
+	ctx := context.Background()
+	c.Names = map[string]string{"a1": "Old Name", "a2": "Other"}
+	c.AddAccount("a1", pb.AccountStatus_ACCOUNT_STATUS_ACTIVE)
+	c.AddAccount("a2", pb.AccountStatus_ACCOUNT_STATUS_ACTIVE)
+	s.Ensure(ctx, "a1")
+	s.Ensure(ctx, "a2")
+	before, _, _ := db.ActiveUserOf(ctx, "a1")
+	c.Names["a1"] = "PS3 Test User"
+	if _, err := s.Ensure(ctx, "a1"); err != nil {
+		t.Fatal(err)
+	}
+	after, _, _ := db.ActiveUserOf(ctx, "a1")
+	if after.Gamertag != "PS3 Test User" || after.XUID != before.XUID {
+		t.Fatalf("rename: %+v -> %+v", before, after)
+	}
+	if l, _ := c.GetActiveLinkByAccount(ctx, "a1"); l.PublicCode != "PS3 Test User" {
+		t.Fatalf("core public code %q", l.PublicCode)
+	}
+	if _, err := db.GetUserByGamertag(ctx, "old name"); err == nil {
+		t.Fatal("old alias must be freed")
+	}
+	// Colliding rename: a2 takes a1's name -> suffix, never a duplicate.
+	c.Names["a2"] = "ps3 test user"
+	s.Ensure(ctx, "a2")
+	u2, _, _ := db.ActiveUserOf(ctx, "a2")
+	if strings.EqualFold(u2.Gamertag, "PS3 Test User") || !acceptable(u2.Gamertag, "ps3 test user", "a2") {
+		t.Fatalf("collision: %q", u2.Gamertag)
+	}
+	// Settled names do not flap.
+	if _, err := s.Ensure(ctx, "a2"); err != nil {
+		t.Fatal(err)
+	}
+	if again, _, _ := db.ActiveUserOf(ctx, "a2"); again.Gamertag != u2.Gamertag {
+		t.Fatal("name flapped")
+	}
+}

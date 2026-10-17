@@ -615,3 +615,14 @@ func (c *Core) PollEvents(_ context.Context, since uint64, limit int) ([]core.Ev
 	}
 	return out, uint64(len(c.events)), nil
 }
+
+// SetCode changes the public code of the account's active link in ns (a rename).
+func (c *Core) SetCode(account, ns, code string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for i := range c.links[account] {
+		if c.links[account][i].Namespace == ns && c.links[account][i].Active {
+			c.links[account][i].Code = code
+		}
+	}
+}

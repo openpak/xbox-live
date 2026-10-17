@@ -83,3 +83,26 @@ func (s *Store) RetireAuto(ctx context.Context, account string) error {
 }
 
 func statusOf(s string) xbaccountapi.Status { return xbaccountapi.Status(s) }
+
+// HasDevice reports whether the account owns an active console device, i.e. the
+// identity carries real credentials and its gamertag is the console's sign-in name.
+func (s *Store) HasDevice(ctx context.Context, account string) (bool, error) {
+	var n int
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM devices WHERE core_account_id=? AND status IN ('active','banned')`, account).Scan(&n)
+	return n > 0, err
+}
+
+// RenameUser changes a user's gamertag and alias. ErrConflict when the new tag is taken.
+func (s *Store) RenameUser(ctx context.Context, xuid, oldTag, newTag string) error {
+	n := s.unix()
+	return s.tx(ctx, func(t *sql.Tx) error {
+		if _, err := t.ExecContext(ctx, `DELETE FROM gamertag_aliases WHERE xuid=? AND alias_lower=?`, xuid, strings.ToLower(oldTag)); err != nil {
+			return err
+		}
+		if _, err := t.ExecContext(ctx, `INSERT INTO gamertag_aliases(alias_lower,xuid,created) VALUES(?,?,?)`, strings.ToLower(newTag), xuid, n); err != nil {
+			return conflict(err)
+		}
+		_, err := t.ExecContext(ctx, `UPDATE users SET gamertag=?,updated=? WHERE xuid=?`, newTag, n, xuid)
+		return err
+	})
+}

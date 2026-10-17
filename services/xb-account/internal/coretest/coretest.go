@@ -23,10 +23,12 @@ type link struct {
 type Core struct {
 	mu       sync.Mutex
 	Accounts map[string]pb.AccountStatus
-	links    map[string]*link
-	idem     map[string]string
-	events   []core.Event
-	n        int
+	// Names overrides the display name of an account ("name-<id>" by default).
+	Names  map[string]string
+	links  map[string]*link
+	idem   map[string]string
+	events []core.Event
+	n      int
 	// Fail returns an error to inject for an operation name, or nil.
 	Fail func(op string) error
 	Ops  []string
@@ -101,7 +103,11 @@ func (c *Core) GetAccount(_ context.Context, id string) (core.Account, error) {
 	if !ok {
 		return core.Account{}, core.ErrNotFound
 	}
-	return core.Account{ID: id, Status: st, Name: "name-" + id}, nil
+	name := "name-" + id
+	if n, ok := c.Names[id]; ok {
+		name = n
+	}
+	return core.Account{ID: id, Status: st, Name: name}, nil
 }
 
 func (c *Core) toLink(l *link) core.Link {

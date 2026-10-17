@@ -614,3 +614,35 @@ func TestPushSourceTargetsOnlyOnlineXboxUsers(t *testing.T) {
 		}
 	}
 }
+
+// A friend renamed in core changes the viewer's list version and is pushed
+// without any add/remove, once the console is signed in.
+func TestRosterWatcherPushesRename(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	e.befriend("alice", "bob", xA, xB)
+	e.must(e.p.Publish(ctx, "alice", xA, "", 1, 0))
+	var got []Push
+	n := &Notifier{Emit: func(uint64, []uint32) {}}
+	w := &RosterWatcher{Svc: e.s, Presence: e.p, Notifier: n}
+	hub := &Hub{}
+	PushSource(hub, e.p, func(p Push) { got = append(got, p) })
+	w.Pass(ctx) // first pass records the version only
+	r1, _ := e.s.Roster(ctx, xA, "")
+	e.c.SetCode("bob", "xbox", "Bobby")
+	r2, _ := e.s.Roster(ctx, xA, "")
+	if r1.BuddyVersion == r2.BuddyVersion || r2.Friends[0].Gamertag != "Bobby" {
+		t.Fatalf("a rename must change the buddy version: %d %d %q", r1.BuddyVersion, r2.BuddyVersion, r2.Friends[0].Gamertag)
+	}
+	w.Pass(ctx)
+	if v, ok := w.last[xA]; !ok || v != r2.BuddyVersion {
+		t.Fatalf("watcher did not record the new version: %v %v", v, ok)
+	}
+	n.mu.Lock()
+	bits := n.users[xA].bits
+	n.mu.Unlock()
+	if bits&vecList == 0 {
+		t.Fatal("rename did not set the list-changed bit")
+	}
+	_ = got
+}

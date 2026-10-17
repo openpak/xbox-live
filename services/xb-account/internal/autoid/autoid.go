@@ -95,7 +95,10 @@ type Service struct {
 // repeatedly.
 func (s *Service) Ensure(ctx context.Context, account string) (bool, error) {
 	defer projection.Lock()()
-	if _, ok, err := s.Store.ActiveUserOf(ctx, account); err != nil || ok {
+	if u, ok, err := s.Store.ActiveUserOf(ctx, account); err != nil || ok {
+		if err == nil {
+			err = s.syncName(ctx, u)
+		}
 		return false, err
 	}
 	acct, err := s.Core.GetAccount(ctx, account)
@@ -216,4 +219,59 @@ func (s *Service) Run(ctx context.Context, interval time.Duration) {
 		case <-time.After(interval):
 		}
 	}
+}
+
+// acceptable reports whether tag is a name Gamertag would give for the display
+// name (with or without a collision suffix), so a settled name never flaps.
+func acceptable(tag, display, account string) bool {
+	for k := 0; k < 12; k++ {
+		if strings.EqualFold(tag, Gamertag(display, account, k)) {
+			return true
+		}
+	}
+	return false
+}
+
+// syncName follows a core display-name change for an identity that carries no
+// credentials. Core emits no profile event, so the periodic pass compares. An
+// identity with a console device keeps its gamertag: it is the sign-in name the
+// console stored, and changing it would lock the console out.
+func (s *Service) syncName(ctx context.Context, u store.User) error {
+	acct, err := s.Core.GetAccount(ctx, u.CoreAccountID)
+	if err != nil || acct.Status != pb.AccountStatus_ACCOUNT_STATUS_ACTIVE {
+		return nil
+	}
+	if acceptable(u.Gamertag, acct.Name, u.CoreAccountID) {
+		return nil
+	}
+	if dev, err := s.Store.HasDevice(ctx, u.CoreAccountID); err != nil || dev {
+		if dev {
+			log.Printf("xbox auto identities: %s keeps gamertag %q (console device); core name differs", u.XUID, u.Gamertag)
+		}
+		return err
+	}
+	for attempt := 0; attempt < 12; attempt++ {
+		tag := Gamertag(acct.Name, u.CoreAccountID, attempt)
+		if !xbaccountapi.ValidGamertag(tag) {
+			continue
+		}
+		if o, err := s.Store.GetUserByGamertag(ctx, tag); err == nil && o.XUID != u.XUID {
+			continue
+		} else if err != nil && !errors.Is(err, store.ErrNotFound) {
+			return err
+		}
+		if err := s.Core.SetLinkPublicCode(ctx, u.LinkID, tag); errors.Is(err, core.ErrConflict) {
+			continue
+		} else if err != nil {
+			return err
+		}
+		if err := s.Store.RenameUser(ctx, u.XUID, u.Gamertag, tag); errors.Is(err, store.ErrConflict) {
+			continue
+		} else if err != nil {
+			return err
+		}
+		log.Printf("xbox auto identities: %s renamed %q -> %q", u.XUID, u.Gamertag, tag)
+		return nil
+	}
+	return errors.New("autoid: no free gamertag for rename")
 }

@@ -287,3 +287,20 @@ func (m *Presences) Run(ctx context.Context, interval time.Duration) {
 		}
 	}
 }
+
+// Online lists the accounts currently online and the XUID each is online as.
+func (m *Presences) Online() map[string]string {
+	m.mu.Lock()
+	accounts := make([]string, 0, len(m.leases))
+	for a := range m.leases {
+		accounts = append(accounts, a)
+	}
+	m.mu.Unlock()
+	out := map[string]string{}
+	for _, a := range accounts {
+		if x, ok := m.XUIDOf(a); ok {
+			out[a] = x
+		}
+	}
+	return out
+}

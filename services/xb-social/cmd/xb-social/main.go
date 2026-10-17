@@ -213,6 +213,7 @@ func startFeature(ctx context.Context, addr string, backend core.Backend, accoun
 		}
 	}()
 	go presence.Run(ctx, 10*time.Second)
+	go (&social.RosterWatcher{Svc: soc, Presence: presence, Notifier: notifier}).Run(ctx, 15*time.Second)
 	go poller.Run(ctx)
 	return g, nil
 }
