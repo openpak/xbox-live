@@ -276,6 +276,10 @@ func TestASThenTGS(t *testing.T) {
 	if addr.HRUser != [4]uint32{krb.HRSuccess, krb.HRInvalidService, krb.HRAccessDenied, krb.HRInvalidService} {
 		t.Fatalf("user results %x (another user's xuid must not be granted)", addr.HRUser)
 	}
+	// The granted user carries the country byte in bits 8..15; ungranted slots carry nothing.
+	if want := [4]uint32{uint32(kdc.DefaultUserCountryID) << 8, 0, 0, 0}; addr.UserFlags != want {
+		t.Fatalf("user flags %x, want %x", addr.UserFlags, want)
+	}
 
 	// Gateway side: the service ticket opens with the shared SG ring only.
 	svc, err := krb.OpenTicket(e.cfg.SGKeys, krb.UsageSGTicket, rep.Ticket)

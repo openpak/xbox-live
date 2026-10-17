@@ -67,6 +67,13 @@ func loadSettings(get func(string) string) (*settings, error) {
 	if s.kdc.ClockSkew, err = duration(get, "XB_CLOCK_SKEW", s.kdc.ClockSkew); err != nil {
 		return nil, err
 	}
+	if v := get("XB_USER_COUNTRY_ID"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 0 || n > 255 {
+			return nil, fmt.Errorf("XB_USER_COUNTRY_ID must be 0..255")
+		}
+		s.kdc.UserCountryID = byte(n)
+	}
 	if v := get("XB_REPLAY_MAX"); v != "" {
 		if s.kdc.ReplayMax, err = strconv.Atoi(v); err != nil || s.kdc.ReplayMax <= 0 {
 			return nil, fmt.Errorf("XB_REPLAY_MAX must be a positive integer")

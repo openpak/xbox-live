@@ -31,6 +31,9 @@ const (
 	// the TGT as opaque and echoes it, and this value is part of the measured
 	// prototype behaviour; it has not been re-verified against hardware here.
 	TGTTicketVNO = 0
+	// DefaultUserCountryID is the LocaleCode of US in OpenPak's country list
+	// (docs/xbox/inx-format.md).
+	DefaultUserCountryID = 103
 	// BandwidthLimit is the bw_limit Xombie advertises. Meaning unmeasured.
 	BandwidthLimit = 9001
 	// MACSDummyKey is the placeholder session key Xombie puts in the (invalid,
@@ -47,6 +50,12 @@ type Config struct {
 	TicketLifetime time.Duration
 	ClockSkew      time.Duration
 	ReplayMax      int
+	// UserCountryID is the country byte (a LocaleCode of the INX country list,
+	// 1..255) delivered to the console in the user flags of every service
+	// address block (bits 8..15 of the user's option word). The dashboard's
+	// Friends entry reads it and refuses to go online while it is 0. It must
+	// name a country in the served /Country/*/CountryMaster2.INX (xb-tou).
+	UserCountryID byte
 
 	TGSKeys  *krb.Keyring // encrypts TGTs, local to xb-auth
 	SGKeys   *krb.Keyring // encrypts gateway tickets, shared with xb-gateway
@@ -60,7 +69,7 @@ func DefaultConfig() Config {
 		Realm: "passport.net", TGSRealm: "XBOX.COM", Domains: []string{"@xbox.com"},
 		GatewayIP:   netip.MustParseAddr(DefaultGatewayIP),
 		TGTLifetime: 24 * time.Hour, TicketLifetime: 24 * time.Hour,
-		ClockSkew: 5 * time.Minute, ReplayMax: 1 << 16,
+		ClockSkew: 5 * time.Minute, ReplayMax: 1 << 16, UserCountryID: DefaultUserCountryID,
 	}
 }
 
@@ -674,6 +683,7 @@ func (k *KDC) serviceAddress(sr *krb.ServiceRequest, xuid uint64) *krb.ServiceAd
 			a.HRUser[i] = krb.HRInvalidService
 		case xuid:
 			a.HRUser[i] = krb.HRSuccess
+			a.UserFlags[i] = uint32(k.cfg.UserCountryID) << 8
 		default:
 			a.HRUser[i] = krb.HRAccessDenied
 		}
