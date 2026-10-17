@@ -119,6 +119,18 @@ func run(log *slog.Logger) error {
 			log.Error("health listener", "err", err.Error())
 		}
 	}()
+	// XBGW_CONTROL_SERVICE=<id>: open the control stream (SG 0x5309 pushes in,
+	// session facts out) to the backend that serves that service id.
+	if v := os.Getenv("XBGW_CONTROL_SERVICE"); v != "" {
+		id, perr := strconv.ParseUint(v, 10, 32)
+		gb, ok := backends[uint32(id)].(*gateway.GRPCBackend)
+		if perr != nil || !ok {
+			return fmt.Errorf("XBGW_CONTROL_SERVICE %q must name a configured gRPC backend", v)
+		}
+		link := &gateway.ControlLink{Backend: gb}
+		srv.SetControl(link)
+		go link.Run(ctx, srv)
+	}
 	if revocations != nil {
 		go srv.FollowRevocations(ctx, revocations)
 	}

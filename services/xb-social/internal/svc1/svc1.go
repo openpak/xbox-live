@@ -79,6 +79,8 @@ var ErrUnsupported = errors.New("svc1: message type not supported")
 type Server struct {
 	Social   *social.Service
 	Presence *social.Presences
+	// Notifier (optional) tracks the per-user version vector the console polls by.
+	Notifier *social.Notifier
 	Lists    Lists    // optional
 	Messages Messages // optional
 	// TTL is how long one Alive keeps the user online (default social.DefaultTTL).
@@ -424,6 +426,9 @@ func (s *Server) alive(ctx context.Context, c Call, msgs [][]byte) (result, erro
 			return result{}, err
 		}
 		log.Printf("svc1: presence not published (continuing): %v", err)
+	}
+	if s.Notifier != nil {
+		s.Notifier.Hello(c.XUID) // the console polls presence once after sign-in
 	}
 	roster, err := s.Social.RosterOf(ctx, account)
 	if err != nil {

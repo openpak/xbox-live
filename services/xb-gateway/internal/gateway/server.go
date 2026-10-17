@@ -35,6 +35,8 @@ type Server struct {
 	backends  map[uint32]Backend
 	now       func() time.Time
 	capture   *capture
+	control   *ControlLink
+	lastAlive time.Time
 
 	conn    *net.UDPConn
 	initSem chan struct{}
@@ -347,6 +349,7 @@ func (s *Server) closeSession(sess *Session, reason string, notify bool) {
 	sess.keys = sgwire.ConnectionKeys{}
 	sess.mu.Unlock()
 	s.unregister(sess)
+	s.controlEvent("closed", sess)
 	s.log.Debug("session closed", "reason", reason)
 	s.frameLog("session closed", "reason", reason, "gen", sess.identity.Generation)
 }
@@ -414,6 +417,7 @@ func (s *Server) sweep() {
 	for i, sess := range dead {
 		s.closeSession(sess, reasons[i], true)
 	}
+	s.aliveTick(now)
 	s.limiter.Prune(now)
 	s.replay.Prune(now)
 }
@@ -425,3 +429,6 @@ func (s *Server) frameLog(msg string, args ...any) {
 		s.log.Info("frame: "+msg, args...)
 	}
 }
+
+// SetControl attaches the control link; call before Serve.
+func (s *Server) SetControl(l *ControlLink) { s.control = l }

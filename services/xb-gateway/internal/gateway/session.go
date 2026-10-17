@@ -77,6 +77,7 @@ type Session struct {
 	conns     map[tcpKey]*tcpConn
 	services  map[uint16]uint32
 	authDrops uint64
+	pushSeq   uint32
 }
 
 // ConnIdentity is the identity the gateway bound at handshake.

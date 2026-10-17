@@ -150,8 +150,15 @@ func (s *Server) notification(ctx context.Context, c Call, body []byte) (result,
 			rec(bd)
 		}
 	}
+	// The poll answers the pending bit of its kind: clear it with a higher version
+	// (version words are applied only when newer) and hand back the vector.
+	var words []uint32
+	if s.Notifier != nil {
+		bit := map[uint16]uint32{0: social.BitList, 1: social.BitList, 3: social.BitInvite, 4: social.BitAnswer}[kind]
+		words = s.Notifier.Take(c.XUID, bit)
+	}
 	// Header, then: xuid u64, kind u16, HR s32, 6 unread bytes, record count u16,
-	// 4 unread, N s32 (0 version words), records.
+	// 4 unread, N s32 version words, the words, records.
 	out := make([]byte, presenceHeader, presenceHeader+0x1e)
 	binary.LittleEndian.PutUint32(out[0:], notifyReplyTyp)
 	copy(out[8:presenceHeader], m[8:presenceHeader])
@@ -161,7 +168,10 @@ func (s *Server) notification(ctx context.Context, c Call, body []byte) (result,
 	out = append(out, make([]byte, 6)...)
 	out = binary.LittleEndian.AppendUint16(out, uint16(len(recs)))
 	out = append(out, make([]byte, 4)...)
-	out = binary.LittleEndian.AppendUint32(out, 0)
+	out = binary.LittleEndian.AppendUint32(out, uint32(len(words)))
+	for _, w := range words {
+		out = binary.LittleEndian.AppendUint32(out, w)
+	}
 	for _, r := range recs {
 		out = append(out, r...)
 	}

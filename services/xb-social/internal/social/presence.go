@@ -162,6 +162,21 @@ func (m *Presences) Disconnect(ctx context.Context, account string, gen uint64) 
 	return m.end(ctx, account, func(l *lease) bool { return gen >= l.gen })
 }
 
+// Touch extends the logical deadline of the account's session while the gateway
+// reports its connection (generation gen) alive; a console sends one Alive per
+// sign-in and no periodic one. Other generations and unknown accounts are ignored.
+func (m *Presences) Touch(account string, gen uint64, ttl time.Duration) {
+	l := m.get(account, false)
+	if l == nil {
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if !l.gone && l.session != "" && l.gen == gen {
+		l.deadline = maxTime(l.deadline, m.now().Add(clampTTL(ttl)))
+	}
+}
+
 // Revoke ends presence unconditionally (ban, unlink, deletion).
 func (m *Presences) Revoke(ctx context.Context, account string) error {
 	return m.end(ctx, account, func(*lease) bool { return true })

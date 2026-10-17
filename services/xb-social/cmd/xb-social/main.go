@@ -175,7 +175,12 @@ func startFeature(ctx context.Context, addr string, backend core.Backend, accoun
 	presence := &social.Presences{Core: backend}
 	hub := &social.Hub{}
 	soc := &social.Service{Core: backend, Resolver: accounts, Presence: presence, Hub: hub}
-	srv := &svc1.Server{Social: soc, Presence: presence, TTL: ttl, OfflineOnClose: os.Getenv("XB_PRESENCE_OFFLINE_ON_CLOSE") == "1",
+	notifier := &social.Notifier{}
+	control := &svc1.Control{Presence: presence, Notifier: notifier, TTL: ttl}
+	notifier.Emit = control.Emit
+	social.PushSource(hub, presence, notifier.Apply)
+	srv := &svc1.Server{Social: soc, Presence: presence, Notifier: notifier, TTL: ttl,
+		Others: map[uint32]xbfeature.Handler{xbfeature.ControlServiceID: control}, OfflineOnClose: os.Getenv("XB_PRESENCE_OFFLINE_ON_CLOSE") == "1",
 		RosterMode: os.Getenv("XB_SOCIAL_ROSTER_MODE"), DebugHex: os.Getenv("XB_SOCIAL_DEBUG_HEX") == "1",
 		Stub: os.Getenv("XB_SOCIAL_MODE_STUB") == "1", StubWork: os.Getenv("XB_SOCIAL_MODE_STUBWORK") == "1"}
 	if v := os.Getenv("XB_SOCIAL_STUB_DELAY_MS"); v != "" {
@@ -186,10 +191,9 @@ func startFeature(ctx context.Context, addr string, backend core.Backend, accoun
 		srv.StubDelay = time.Duration(ms) * time.Millisecond
 	}
 	// Friend/invite operations, the notification poll and AliveReply lists are
-	// built in (docs/xbox/social-protocol.md). Messaging (service 18) and the
-	// gateway UDP push (social.PushSource -> 0x5309) are not wired: no push
-	// channel to the gateway exists yet, so the console only learns of changes
-	// when it polls.
+	// built in (docs/xbox/social-protocol.md). Changes reach the console through
+	// the gateway control stream (SG 0x5309 push, section 8). Messaging
+	// (service 18) is not served.
 	stateDir := os.Getenv("XB_STATE_DIR")
 	if stateDir == "" {
 		stateDir = "/var/lib/xb-social"
