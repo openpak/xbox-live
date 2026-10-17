@@ -178,7 +178,12 @@ func (s *Server) handleInit(pkt []byte, peer netip.AddrPort) {
 	}
 	id, err := s.verifier.VerifyAPReq(init.APReq, now)
 	if err != nil || id == nil {
-		s.reject("ticket")
+		reason := "ticket"
+		var te *TicketError
+		if errors.As(err, &te) {
+			reason = "ticket: " + te.Reason
+		}
+		s.reject(reason)
 		return
 	}
 	if reason := s.checkIdentity(id, init, now); reason != "" {

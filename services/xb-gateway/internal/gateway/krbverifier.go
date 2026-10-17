@@ -20,27 +20,44 @@ type KrbVerifier struct {
 
 var errTicket = errors.New("gateway: ticket rejected")
 
+// TicketError is errTicket with the failed check, for the rejection log. It
+// names the check only, never ticket contents.
+type TicketError struct{ Reason string }
+
+func (e *TicketError) Error() string   { return "gateway: ticket rejected: " + e.Reason }
+func (e *TicketError) Is(t error) bool { return t == errTicket }
+
+func ticketErr(reason string) error { return &TicketError{reason} }
+
 func (v KrbVerifier) VerifyAPReq(apReq []byte, now time.Time) (*Identity, error) {
 	req, err := krb.ParseAPReq(apReq)
 	if err != nil || req.Ticket.VNO != krb.PVNO {
-		return nil, errTicket
+		return nil, ticketErr("ap-req parse or ticket version")
 	}
 	part, err := krb.OpenTicket(v.SGKeys, krb.UsageSGTicket, req.Ticket)
 	if err != nil || part.Flags&krb.FlagInvalid != 0 || part.Key.Type != krb.ETypeRC4HMAC {
-		return nil, errTicket
+		return nil, ticketErr("ticket does not open under the sg keyring (kvno/key/flags)")
 	}
 	sessionKey, err := krb.ToKey(part.Key.Value)
 	if err != nil {
-		return nil, errTicket
+		return nil, ticketErr("session key")
 	}
 	plain, err := krb.Open(sessionKey, krb.UsageAPReqAuth, req.Authenticator)
 	if err != nil {
-		return nil, errTicket
+		return nil, ticketErr("authenticator does not decrypt")
 	}
 	auth, err := krb.ParseSGAuthenticator(plain)
-	if err != nil || auth.CRealm != part.CRealm || !auth.CName.Equal(part.CName) ||
-		auth.CksumType != krb.ChecksumTypeSGParam || len(auth.Cksum) == 0 {
-		return nil, errTicket
+	if err != nil {
+		return nil, ticketErr("authenticator parse")
+	}
+	if auth.CRealm != part.CRealm {
+		return nil, ticketErr("authenticator realm differs from ticket")
+	}
+	if !auth.CName.Equal(part.CName) {
+		return nil, ticketErr("authenticator client name differs from ticket")
+	}
+	if auth.CksumType != krb.ChecksumTypeSGParam || len(auth.Cksum) == 0 {
+		return nil, ticketErr("authenticator checksum type")
 	}
 	var xuid uint64
 	var users, addrs int
@@ -50,18 +67,18 @@ func (v KrbVerifier) VerifyAPReq(apReq []byte, now time.Time) (*Identity, error)
 		case krb.ADUsers:
 			users++
 			if len(ad.Data) != 8 {
-				return nil, errTicket
+				return nil, ticketErr("users entry size")
 			}
 			xuid = binary.LittleEndian.Uint64(ad.Data)
 		case krb.ADServiceAddresses:
 			addrs++
 			if address, err = krb.ParseServiceAddress(ad.Data); err != nil {
-				return nil, errTicket
+				return nil, ticketErr("service address entry")
 			}
 		}
 	}
 	if users != 1 || addrs != 1 || xuid == 0 || address.NumServices > krb.MaxServices {
-		return nil, errTicket
+		return nil, ticketErr("authorization data (users/service addresses count or xuid)")
 	}
 	id := &Identity{XUID: xuid, SessionKey: sessionKey, GatewayIP: address.SiteIP,
 		TicketStart: part.Start(), TicketEnd: part.EndTime,
