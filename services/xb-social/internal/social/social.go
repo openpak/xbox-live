@@ -169,12 +169,14 @@ func (s *Service) peer(ctx context.Context, actor, xuid string) (string, error) 
 	switch {
 	case err == nil:
 	case errors.Is(err, xbaccountapi.ErrDenied), errors.Is(err, xbaccountapi.ErrNotFound), errors.Is(err, xbaccountapi.ErrInvalid):
+		log.Printf("social: peer %s not admitted: %v", xuid, err)
 		return "", ErrUnknownUser
 	default:
 		log.Printf("social: resolve peer: %v", err)
 		return "", ErrUnavailable
 	}
 	if p.CoreAccountID == "" || p.PrincipalID != xuid {
+		log.Printf("social: peer %s resolved to principal %q account %q", xuid, p.PrincipalID, p.CoreAccountID)
 		return "", ErrUnknownUser
 	}
 	if p.CoreAccountID == actor {
