@@ -30,3 +30,12 @@ in its native SG-init packet builder. Full evidence and capture limitations:
 https://github.com/openpak/docs/blob/main/xbox/gateway-port-audit-2026-10-16.md .
 This is independent client-code evidence; do not describe --sg-port as native
 port negotiation. No backend service was started by the isolated capture test.
+
+## Split into per-service repositories (2026-10-17)
+
+The Go services moved out at commit `7fc575dd21485791ed80149deba4f158e66044ae`
+(branch `openpak`) with history preserved (`git filter-repo`): xb-common (shared
+public packages), xb-account, xb-auth, xb-gateway, xb-social, xb-enroll, xb-tou,
+xb-dns, xb-e2e, all under github.com/openpak. Each carries the AGPL-3.0 LICENSE and
+a NOTICE listing the Xombie-derived files it still contains. The Rust workspace and
+the inherited licences (`third_party/*`) stay here, untouched.
