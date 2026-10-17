@@ -566,3 +566,44 @@ func TestWrongKeys(t *testing.T) {
 		t.Fatal("gateway admitted an init authenticated with the wrong session key")
 	}
 }
+
+// The order a real console uses (observed 2026-10-16): user AS alone, then the
+// machine account AS with the user's TGT as compound identity, then TGS and the
+// SG init. The ticket's client name is the machine account's; the init's
+// authenticator must carry the same name for the gateway to admit it.
+func TestRealConsoleOrderToGatewayAdmission(t *testing.T) {
+	w := newWorld(t)
+	c := w.provision(consoleKey())
+	blob, code := w.macs(c.machineKey)
+	if code != 0 {
+		t.Fatalf("MACS error %d", code)
+	}
+	var mk, uk xbcrypto.Key
+	copy(mk[:], blob[68:])
+	ublob, err := w.kdc.UserAccountBlob(context.Background(), c.xuid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	copy(uk[:], ublob[68:])
+	var xuid uint64
+	for i, b := range ublob[:8] {
+		xuid |= uint64(b) << (8 * i)
+	}
+	userTGT, code := w.as(gamertag, uk, 20, nil)
+	if code != 0 {
+		t.Fatalf("user AS error %d", code)
+	}
+	compound := xbcrypto.CompoundKey(mk, userTGT.session)
+	machTGT, code := w.as("SN."+serial, compound, 21, wrapSeq(userTGT.ticket.Marshal()))
+	if code != 0 {
+		t.Fatalf("machine AS with user compound error %d", code)
+	}
+	svc, svcKey, code := w.tgs(machTGT, "SN."+serial, xuid)
+	if code != 0 {
+		t.Fatalf("TGS error %d", code)
+	}
+	reply, admitted := w.sgInit(svc, svcKey, "SN."+serial)
+	if reply == nil || !admitted {
+		t.Fatal("gateway rejected the machine+user ticket with a matching authenticator name")
+	}
+}
