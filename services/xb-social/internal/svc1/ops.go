@@ -17,8 +17,8 @@ import (
 const (
 	opFriendRequest = 0x3ec
 	opRemove        = 0x3ed
-	opDecline       = 0x3ee
-	opAcceptBlock   = 0x3ef
+	opAccept        = 0x3ee // observed live: "Accept Friend Request" sends 0x3ee, body xuid + target
+	opDeclineBlock  = 0x3ef // "Decline Friend Request" sends 0x3ef with u32 0, "Block Friend Requests" u32 1
 	opSendInvite    = 0x3f3
 	opAnswerInvite  = 0x3f4
 )
@@ -47,9 +47,9 @@ func (s *Server) operation(ctx context.Context, c Call, typ uint32, msg []byte) 
 	switch typ {
 	case opFriendRequest:
 		want = 0x12
-	case opRemove, opDecline:
+	case opRemove, opAccept:
 		want = 0x10
-	case opAcceptBlock:
+	case opDeclineBlock:
 		want = 0x14
 	case opSendInvite:
 		want = -1
@@ -88,12 +88,12 @@ func (s *Server) operation(ctx context.Context, c Call, typ uint32, msg []byte) 
 			err = svc.CancelFriendRequest(ctx, c.XUID, acct, u(8))
 		}
 		return opResult(err)
-	case opDecline:
-		return opResult(svc.DeclineFriendRequest(ctx, c.XUID, acct, u(8)))
-	case opAcceptBlock:
+	case opAccept:
+		return opResult(svc.AcceptFriendRequest(ctx, c.XUID, acct, u(8)))
+	case opDeclineBlock:
 		switch binary.LittleEndian.Uint32(body[16:]) {
 		case 0:
-			return opResult(svc.AcceptFriendRequest(ctx, c.XUID, acct, u(8)))
+			return opResult(svc.DeclineFriendRequest(ctx, c.XUID, acct, u(8)))
 		case 1:
 			return opResult(svc.Block(ctx, c.XUID, acct, u(8)))
 		}

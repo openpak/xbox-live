@@ -64,15 +64,15 @@ func TestFriendOperations(t *testing.T) {
 	if c := e.op(t, a, "alice", msg(opFriendRequest, 1, a, uint64(0x0009ffffffffffff), uint16(0))); !strings.HasSuffix(c, "X-Err:80152008") {
 		t.Fatalf("unknown %q", c)
 	}
-	// Bob declines, then asks, and Alice accepts (0x3ef with 0).
-	if c := e.op(t, b, "bob", msg(opDecline, 1, b, a)); c != ok {
+	// Bob declines, then asks, and Alice accepts (0x3ee).
+	if c := e.op(t, b, "bob", msg(opDeclineBlock, 1, b, a, uint32(0))); c != ok {
 		t.Fatalf("decline %q", c)
 	}
-	if c := e.op(t, b, "bob", msg(opDecline, 1, b, a)); !strings.HasSuffix(c, "X-Err:80152008") {
+	if c := e.op(t, b, "bob", msg(opDeclineBlock, 1, b, a, uint32(0))); !strings.HasSuffix(c, "X-Err:80152008") {
 		t.Fatalf("decline twice %q", c)
 	}
 	e.op(t, b, "bob", msg(opFriendRequest, 1, b, a, uint16(0)))
-	if c := e.op(t, a, "alice", msg(opAcceptBlock, 1, a, b, uint32(0))); c != ok {
+	if c := e.op(t, a, "alice", msg(opAccept, 1, a, b)); c != ok {
 		t.Fatalf("accept %q", c)
 	}
 	if c := e.op(t, a, "alice", msg(opFriendRequest, 1, a, b, uint16(0))); !strings.HasSuffix(c, "X-Err:80152007") {
@@ -87,7 +87,7 @@ func TestFriendOperations(t *testing.T) {
 		t.Fatalf("cancel %q", c)
 	}
 	// Block (0x3ef with 1).
-	if c := e.op(t, a, "alice", msg(opAcceptBlock, 1, a, b, uint32(1))); c != ok {
+	if c := e.op(t, a, "alice", msg(opDeclineBlock, 1, a, b, uint32(1))); c != ok {
 		t.Fatalf("block %q", c)
 	}
 	r, _ := e.srv.Social.Roster(context.Background(), fmt.Sprintf("%016x", a), "")
@@ -101,7 +101,7 @@ func TestFriendOperations(t *testing.T) {
 	if c := e.op(t, a, "alice", msg(opRemove, 1, b, a)); !strings.HasPrefix(c, "HTTP/1.0 400") {
 		t.Fatalf("sender is not the connection user: %q", c)
 	}
-	if c := e.op(t, a, "alice", msg(opAcceptBlock, 1, a, b, uint32(7))); !strings.HasPrefix(c, "HTTP/1.0 400") {
+	if c := e.op(t, a, "alice", msg(opDeclineBlock, 1, a, b, uint32(7))); !strings.HasPrefix(c, "HTTP/1.0 400") {
 		t.Fatalf("bad mode %q", c)
 	}
 }
@@ -110,7 +110,7 @@ func TestInviteOperationsAndNotificationPoll(t *testing.T) {
 	e := newEnv(t)
 	a, b := xAlice, bobX
 	e.op(t, a, "alice", msg(opFriendRequest, 1, a, b, uint16(0)))
-	e.op(t, b, "bob", msg(opAcceptBlock, 1, b, a, uint32(0)))
+	e.op(t, b, "bob", msg(opAccept, 1, b, a))
 	// Nobody is in a title yet: no presence session.
 	if c := e.op(t, a, "alice", msg(opSendInvite, 1, a, uint64(99), uint16(1), b)); !strings.HasSuffix(c, "X-Err:8015200c") {
 		t.Fatalf("offline invite %q", c)
