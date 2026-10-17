@@ -14,6 +14,8 @@ package friends
 import (
 	"context"
 	"errors"
+	"fmt"
+	"log"
 	"sync"
 
 	"openpak/xb-live/internal/xbaccountapi"
@@ -88,7 +90,7 @@ func (s *Service) Friends(ctx context.Context, viewerXUID string) (List, error) 
 func (s *Service) FriendsOf(ctx context.Context, account string) (List, error) {
 	raw, err := s.Core.ListFriends(ctx, account)
 	if err != nil {
-		return List{}, ErrUnavailable
+		return List{}, fmt.Errorf("%w: ListFriends: %v", ErrUnavailable, err)
 	}
 	type slot struct {
 		link core.Link
@@ -115,14 +117,21 @@ func (s *Service) FriendsOf(ctx context.Context, account string) (List, error) {
 			case errors.Is(err, core.ErrNotFound):
 			default:
 				errs[i] = err
+				log.Printf("friends: link lookup failed for a friend (skipped): %v", err)
 			}
 		}()
 	}
 	wg.Wait()
+	// One friend whose link cannot be read is omitted and counted; only a
+	// wholesale failure (every lookup failed) is an outage, never a half list.
+	failed := 0
 	for _, err := range errs {
 		if err != nil {
-			return List{}, ErrUnavailable // never a silently truncated list
+			failed++
 		}
+	}
+	if failed > 0 && failed == len(raw) {
+		return List{}, fmt.Errorf("%w: every friend link lookup failed (%d): %v", ErrUnavailable, failed, errors.Join(errs...))
 	}
 
 	out := List{Friends: []Friend{}}
@@ -150,7 +159,8 @@ func (s *Service) FriendsOf(ctx context.Context, account string) (List, error) {
 	for j, id := range ids {
 		ok, err := s.Core.CanDiscover(ctx, account, id)
 		if err != nil {
-			return List{}, ErrUnavailable
+			log.Printf("friends: CanDiscover failed (shown offline): %v", err)
+			continue
 		}
 		if ok {
 			visible = append(visible, id)
@@ -162,7 +172,8 @@ func (s *Service) FriendsOf(ctx context.Context, account string) (List, error) {
 	}
 	pres, err := s.Core.GetPresence(ctx, visible)
 	if err != nil {
-		return List{}, ErrUnavailable
+		log.Printf("friends: GetPresence failed (all shown offline): %v", err)
+		return out, nil // the list itself is real; presence is a best-effort overlay
 	}
 	for _, p := range pres {
 		j, ok := visibleAt[p.AccountID]

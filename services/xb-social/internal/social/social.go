@@ -204,7 +204,7 @@ func (s *Service) PeerByGamertag(ctx context.Context, gamertag string) (string, 
 func (s *Service) people(ctx context.Context, ids []string) (map[string]Person, error) {
 	out := make(map[string]Person, len(ids))
 	var mu sync.Mutex
-	var failed bool
+	var failed int
 	n := s.Concurrency
 	if n <= 0 {
 		n = 8
@@ -227,13 +227,14 @@ func (s *Service) people(ctx context.Context, ids []string) (map[string]Person, 
 				}
 			case errors.Is(err, core.ErrNotFound):
 			default:
-				failed = true
+				failed++
+				log.Printf("roster: link lookup failed (skipped): %v", err)
 			}
 		}()
 	}
 	wg.Wait()
-	if failed {
-		return nil, ErrUnavailable
+	if failed > 0 && failed == len(ids) {
+		return nil, fmt.Errorf("%w: every identity lookup failed (%d)", ErrUnavailable, failed)
 	}
 	return out, nil
 }

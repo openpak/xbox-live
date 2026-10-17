@@ -148,13 +148,35 @@ func TestViewerAdmission(t *testing.T) {
 	}
 }
 
-func TestBackendFailureNeverYieldsPartialList(t *testing.T) {
-	for _, op := range []string{"friends", "link:b", "check", "presence"} {
+// Regression (live 503): one friend whose link cannot be read must not fail the
+// whole list; presence and discovery checks are a best-effort overlay.
+func TestOneBadFriendOrPresenceFailureStillAnswers(t *testing.T) {
+	c := fixture()
+	c.failOp = "link:b"
+	l, err := svc(c, fakeRes{}).Friends(context.Background(), viewer)
+	if err != nil || len(l.Friends) != 2 || l.Omitted != 3 { // a, e listed; b (failed), c, d omitted
+		t.Fatalf("bad link: %+v %v", l, err)
+	}
+	for _, op := range []string{"check", "presence"} {
 		c := fixture()
 		c.failOp = op
-		if l, err := svc(c, fakeRes{}).Friends(context.Background(), viewer); !errors.Is(err, ErrUnavailable) || len(l.Friends) != 0 {
+		l, err := svc(c, fakeRes{}).Friends(context.Background(), viewer)
+		if err != nil || len(l.Friends) != 3 {
 			t.Fatalf("%s: %+v %v", op, l, err)
 		}
+		for _, f := range l.Friends {
+			if f.Presence.State != Offline {
+				t.Fatalf("%s: %+v shown online without data", op, f)
+			}
+		}
+	}
+}
+
+func TestBackendOutageIsNotAPartialList(t *testing.T) {
+	c := fixture()
+	c.failOp = "friends"
+	if l, err := svc(c, fakeRes{}).Friends(context.Background(), viewer); !errors.Is(err, ErrUnavailable) || len(l.Friends) != 0 {
+		t.Fatalf("%+v %v", l, err)
 	}
 }
 
