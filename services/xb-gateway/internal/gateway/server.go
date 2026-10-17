@@ -270,6 +270,8 @@ func (s *Server) checkIdentity(id *Identity, init sgwire.Init, now time.Time) st
 	switch {
 	case id.GatewayIP != s.cfg.AdvertiseIP:
 		return "ticket targets a different gateway"
+	case !s.cfg.MinTicketStart.IsZero() && id.TicketStart.Before(s.cfg.MinTicketStart):
+		return "ticket issued before XBGW_MIN_TICKET_START"
 	case id.TicketEnd.IsZero() || !now.Before(id.TicketEnd) || now.Before(id.TicketStart) || !id.TicketEnd.After(id.TicketStart):
 		return "ticket not currently valid"
 	}
