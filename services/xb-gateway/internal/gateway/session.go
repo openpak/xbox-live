@@ -6,8 +6,11 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
+	"fmt"
 	"net/netip"
+	"strings"
 	"sync"
 	"time"
 
@@ -103,6 +106,9 @@ func (s *Session) send(op sgwire.Opcode, footer, payload []byte) {
 	if err != nil {
 		return
 	}
+	if s.srv.cfg.DebugFrames {
+		s.logFrame("tx", op, footer, payload)
+	}
 	s.srv.capture.record(true, byte(op)|0x40, s.spi.U32(), footer) // 0x40: footer (TCP header)
 	s.srv.capture.record(true, byte(op), s.spi.U32(), payload)
 	s.srv.conn.WriteToUDPAddrPort(pkt, s.peer)
@@ -117,19 +123,25 @@ func (s *Session) handle(buf []byte, now time.Time) {
 	}
 	pkt, err := sgwire.Open(buf, s.keys.ClientToSG, s.replay.Highest)
 	if err != nil {
+		s.srv.frameLog("drop auth", "gen", s.identity.Generation, "err", err.Error(), "len", len(buf))
 		s.authDrops++
 		s.srv.stats.authDrops.Add(1)
 		return
 	}
 	if !s.replay.Accept(pkt.Seq) {
+		s.srv.frameLog("drop replay", "gen", s.identity.Generation, "seq", pkt.Seq)
 		s.srv.stats.replayDrops.Add(1)
 		return
 	}
 	if !s.bucket.allow(now, s.srv.cfg.PacketRate, s.srv.cfg.PacketBurst) {
+		s.srv.frameLog("drop rate", "gen", s.identity.Generation)
 		s.srv.stats.rateDrops.Add(1)
 		return
 	}
 	s.lastSeen = now
+	if s.srv.cfg.DebugFrames {
+		s.logFrame("rx", pkt.Opcode, pkt.Footer, pkt.Payload)
+	}
 	s.srv.capture.record(false, byte(pkt.Opcode)|0x40, s.spi.U32(), pkt.Footer)
 	s.srv.capture.record(false, byte(pkt.Opcode), s.spi.U32(), pkt.Payload)
 	if pkt.Opcode == sgwire.OpControl {
@@ -478,4 +490,34 @@ func (k *sink) Close() {
 		c.state = finSent
 	}
 	s.dropConn(c)
+}
+
+// logFrame logs one frame: opcode, TCP header fields, control chunk tags, and a
+// bounded hex prefix of TCP data (after options). Debug aid behind XBGW_DEBUG_FRAMES.
+func (s *Session) logFrame(dir string, op sgwire.Opcode, footer, payload []byte) {
+	if op == sgwire.OpControl {
+		chunks, err := sgwire.ParseChunks(payload)
+		if err != nil {
+			s.srv.frameLog(dir+" control", "gen", s.identity.Generation, "len", len(payload), "parse", err.Error())
+			return
+		}
+		tags := make([]string, 0, len(chunks))
+		for _, c := range chunks {
+			tags = append(tags, fmt.Sprintf("%#x/%d", c.Tag, len(c.Data)))
+		}
+		s.srv.frameLog(dir+" control", "gen", s.identity.Generation, "chunks", strings.Join(tags, ","))
+		return
+	}
+	hdr, err := sgwire.ParseTCPHeader(op, footer)
+	if err != nil {
+		s.srv.frameLog(dir+" tcp", "gen", s.identity.Generation, "op", uint8(op), "err", err.Error())
+		return
+	}
+	data := payload
+	if n := hdr.OptionsLen(); n <= len(data) {
+		data = data[n:]
+	}
+	pre := data[:min(len(data), 64)]
+	s.srv.frameLog(dir+" tcp", "gen", s.identity.Generation, "op", uint8(op), "sport", hdr.Src, "dport", hdr.Dst,
+		"flags", fmt.Sprintf("%#x", hdr.Flags()), "seq", hdr.Seq, "ack", hdr.Ack, "win", hdr.Window, "dlen", len(data), "hex", hex.EncodeToString(pre))
 }

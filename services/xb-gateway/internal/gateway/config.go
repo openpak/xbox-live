@@ -31,6 +31,7 @@ type Config struct {
 	DirectoryWait time.Duration
 	MaxTCPPerSess int
 
+	DebugFrames  bool   // off by default; logs per-frame metadata and a short hex prefix of TCP data
 	DebugCapture bool   // off by default; writes decrypted payloads
 	CaptureDir   string // required when DebugCapture
 	CaptureMax   int64
@@ -99,6 +100,7 @@ func ConfigFromEnv(lookup func(string) (string, bool)) (Config, error) {
 	get("XBGW_PACKET_RATE", float(&c.PacketRate))
 	get("XBGW_IDLE_TIMEOUT", dur(&c.IdleTimeout))
 	get("XBGW_MAX_LIFETIME", dur(&c.MaxLifetime))
+	get("XBGW_DEBUG_FRAMES", func(v string) (err error) { c.DebugFrames, err = strconv.ParseBool(v); return })
 	get("XBGW_DEBUG_CAPTURE", func(v string) (err error) { c.DebugCapture, err = strconv.ParseBool(v); return })
 	get("XBGW_CAPTURE_DIR", func(v string) error { c.CaptureDir = v; return nil })
 	if err := errors.Join(errs...); err != nil {

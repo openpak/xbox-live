@@ -249,6 +249,7 @@ func (s *Server) handleInit(pkt []byte, peer netip.AddrPort) {
 	}
 	sess.initResp = out
 	s.stats.initAccepted.Add(1)
+	s.frameLog("session opened", "gen", sess.identity.Generation, "peer", peer.String(), "services", sess.services)
 	s.lastHandshake.Store(now.Unix())
 	s.conn.WriteToUDPAddrPort(out, peer)
 }
@@ -345,6 +346,7 @@ func (s *Server) closeSession(sess *Session, reason string, notify bool) {
 	sess.mu.Unlock()
 	s.unregister(sess)
 	s.log.Debug("session closed", "reason", reason)
+	s.frameLog("session closed", "reason", reason, "gen", sess.identity.Generation)
 }
 
 func (s *Server) closeAll() {
@@ -412,4 +414,12 @@ func (s *Server) sweep() {
 	}
 	s.limiter.Prune(now)
 	s.replay.Prune(now)
+}
+
+// frameLog emits a debug line when XBGW_DEBUG_FRAMES is set. It carries
+// metadata only (and short hex prefixes added by callers), never keys.
+func (s *Server) frameLog(msg string, args ...any) {
+	if s.cfg.DebugFrames {
+		s.log.Info("frame: "+msg, args...)
+	}
 }
