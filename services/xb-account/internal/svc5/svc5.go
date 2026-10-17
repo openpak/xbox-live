@@ -211,7 +211,7 @@ func xerr(code uint32) response { return response{code: 200, xerr: code, hasErr:
 
 func (s *Server) handle(ctx context.Context, info xbfeature.Info, req *http.Request, body []byte) response {
 	path := strings.ToLower(req.URL.Path)
-	if !strings.HasSuffix(path, ".ashx") {
+	if !strings.HasSuffix(path, ".ashx") && path != "/xpnfront/xpresence.srf" {
 		return status(404)
 	}
 	switch {
@@ -219,6 +219,21 @@ func (s *Server) handle(ctx context.Context, info xbfeature.Info, req *http.Requ
 		if req.Header.Get("Content-Type") != "xon/5" {
 			return status(400)
 		}
+	case path == "/xpnfront/xpresence.srf":
+		if req.Header.Get("Content-Type") != "xon/1" {
+			return status(400)
+		}
+		if req.Method != http.MethodPost {
+			return status(405)
+		}
+		// Presence belongs to a signed-in user: identity is the gateway-bound XUID.
+		if info.XUID == 0 || info.ServiceID != 1 {
+			return status(403)
+		}
+		if !s.allow("u" + fmt.Sprint(info.XUID)) {
+			return status(429)
+		}
+		return s.presence(ctx, info, body)
 	case path == "/xbos/offeringdetailsnouser.ashx":
 		if req.Header.Get("Content-Type") != "xon/4" {
 			return status(400)
