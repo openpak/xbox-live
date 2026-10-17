@@ -84,6 +84,8 @@ type Principal struct {
 	// Gamertag is set for users only (the current alias); xb-auth needs it to
 	// build the user's account blob. Empty for devices.
 	Gamertag string `json:"gamertag,omitempty"`
+	// Country is the account profile country (alpha-2) for users; empty when core has none.
+	Country string `json:"country,omitempty"`
 }
 
 var (

@@ -78,12 +78,13 @@ func (r *Resolver) ResolveUser(ctx context.Context, xuid string) (xbaccountapi.P
 	case l.State != pb.LinkState_LINK_STATE_ACTIVE || l.AccountID != u.CoreAccountID || (u.LinkID != "" && l.LinkID != u.LinkID):
 		return xbaccountapi.Principal{}, denied(xbaccountapi.KindUser, xuid, u.CoreAccountID, xbaccountapi.StatusUnlinked)
 	}
-	if s, err := r.accountOK(ctx, u.CoreAccountID); err != nil {
+	s, country, err := r.accountInfo(ctx, u.CoreAccountID)
+	if err != nil {
 		return xbaccountapi.Principal{}, err
 	} else if s != xbaccountapi.StatusActive {
 		return xbaccountapi.Principal{}, denied(xbaccountapi.KindUser, xuid, u.CoreAccountID, s)
 	}
-	return xbaccountapi.Principal{Kind: xbaccountapi.KindUser, PrincipalID: xuid, CoreAccountID: u.CoreAccountID, Status: xbaccountapi.StatusActive, Gamertag: u.Gamertag}, nil
+	return xbaccountapi.Principal{Kind: xbaccountapi.KindUser, PrincipalID: xuid, CoreAccountID: u.CoreAccountID, Status: xbaccountapi.StatusActive, Gamertag: u.Gamertag, Country: country}, nil
 }
 
 // ResolveGamertag looks up the current gamertag alias, then applies exactly
@@ -103,14 +104,19 @@ func (r *Resolver) ResolveGamertag(ctx context.Context, tag string) (xbaccountap
 }
 
 func (r *Resolver) accountOK(ctx context.Context, id string) (xbaccountapi.Status, error) {
+	s, _, err := r.accountInfo(ctx, id)
+	return s, err
+}
+
+func (r *Resolver) accountInfo(ctx context.Context, id string) (xbaccountapi.Status, string, error) {
 	a, err := r.Core.GetAccount(ctx, id)
 	if errors.Is(err, core.ErrNotFound) {
-		return xbaccountapi.StatusDeleted, nil
+		return xbaccountapi.StatusDeleted, "", nil
 	}
 	if err != nil {
-		return "", xbaccountapi.ErrUnavailable
+		return "", "", xbaccountapi.ErrUnavailable
 	}
-	return accountStatus(a.Status), nil
+	return accountStatus(a.Status), a.Country, nil
 }
 
 func (r *Resolver) ResolveDevice(ctx context.Context, machineID string) (xbaccountapi.Principal, error) {

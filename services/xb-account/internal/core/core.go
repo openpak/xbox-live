@@ -31,6 +31,8 @@ type Account struct {
 	ID     string
 	Status pb.AccountStatus
 	Name   string
+	// Country is the profile country as core stores it (ISO 3166-1 alpha-2 assumed; empty when never collected).
+	Country string
 }
 
 type Link struct {
@@ -101,7 +103,7 @@ func (c *Client) GetAccount(p context.Context, id string) (Account, error) {
 	if r.AccountId != id {
 		return Account{}, ErrUnavailable
 	}
-	return Account{r.AccountId, r.Status, r.DisplayName}, nil
+	return Account{r.AccountId, r.Status, r.DisplayName, r.Country}, nil
 }
 
 func link(r *pb.GetLinkBySubjectResponse, subject string) Link {

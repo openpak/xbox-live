@@ -26,9 +26,9 @@ type fake struct {
 func (f *fake) ResolveUser(_ context.Context, id string) (Principal, error) {
 	switch id {
 	case xuid:
-		return Principal{KindUser, id, "acct", StatusActive, ""}, nil
+		return Principal{KindUser, id, "acct", StatusActive, "", ""}, nil
 	case "0009000000000002":
-		return Principal{}, &DeniedError{Principal{KindUser, id, "acct", StatusBanned, ""}}
+		return Principal{}, &DeniedError{Principal{KindUser, id, "acct", StatusBanned, "", ""}}
 	case "0009000000000003":
 		return Principal{}, ErrNotFound
 	}
@@ -47,9 +47,9 @@ func (f *fake) ResolveGamertag(ctx context.Context, tag string) (Principal, erro
 }
 func (f *fake) ResolveDevice(_ context.Context, id string) (Principal, error) {
 	if id == mach {
-		return Principal{KindDevice, id, "acct", StatusActive, ""}, nil
+		return Principal{KindDevice, id, "acct", StatusActive, "", ""}, nil
 	}
-	return Principal{}, &DeniedError{Principal{KindDevice, id, "acct", StatusUnlinked, ""}}
+	return Principal{}, &DeniedError{Principal{KindDevice, id, "acct", StatusUnlinked, "", ""}}
 }
 func (f *fake) Poll(_ context.Context, after uint64, limit int, _ time.Duration) ([]Revocation, error) {
 	f.mu.Lock()
@@ -217,7 +217,7 @@ func (keys) DeviceKey(_ context.Context, id string) (xbcrypto.Key, error) {
 	case mach:
 		return xbcrypto.Key{1, 2, 3}, nil
 	case "0000000000000002":
-		return xbcrypto.Key{}, &DeniedError{Principal{KindDevice, id, "acct", StatusRevoked, ""}}
+		return xbcrypto.Key{}, &DeniedError{Principal{KindDevice, id, "acct", StatusRevoked, "", ""}}
 	}
 	return xbcrypto.Key{}, ErrNotFound
 }

@@ -247,10 +247,16 @@ func admitted(p xbaccountapi.Principal, err error, kind xbaccountapi.Kind, id st
 }
 
 func (k *KDC) admitUser(ctx context.Context, xuid uint64) int32 {
+	code, _ := k.admitUserCountry(ctx, xuid)
+	return code
+}
+
+// admitUserCountry also returns the account's profile country (alpha-2, may be empty).
+func (k *KDC) admitUserCountry(ctx context.Context, xuid uint64) (int32, string) {
 	id := fmt.Sprintf("%016x", xuid)
 	p, err := k.accounts.ResolveUser(ctx, id)
 	_, code := admitted(p, err, xbaccountapi.KindUser, id)
-	return code
+	return code, p.Country
 }
 
 func (k *KDC) admitDevice(ctx context.Context, machineID uint64) int32 {
@@ -587,12 +593,16 @@ func (k *KDC) handleTGS(ctx context.Context, req *krb.KDCReq, now time.Time) []b
 
 	// Re-check admission on every request so a ban or unlink stops new
 	// tickets at once.
-	admit := k.admitUser
+	var country string
 	if machineOnly {
-		admit = k.admitDevice
-	}
-	if code := admit(ctx, tgtXUID); code != 0 {
-		return k.fail(code, now, cname)
+		if code := k.admitDevice(ctx, tgtXUID); code != 0 {
+			return k.fail(code, now, cname)
+		}
+	} else {
+		var code int32
+		if code, country = k.admitUserCountry(ctx, tgtXUID); code != 0 {
+			return k.fail(code, now, cname)
+		}
 	}
 	if tgtXUID != 0 && tgtDevice != 0 && !machineOnly {
 		if code := k.admitDevice(ctx, tgtDevice); code != 0 {
@@ -621,7 +631,7 @@ func (k *KDC) handleTGS(ctx context.Context, req *krb.KDCReq, now time.Time) []b
 		if err != nil {
 			return k.fail(krb.ErrPolicy, now, cname)
 		}
-		address = k.serviceAddress(sr, principal.XUID)
+		address = k.serviceAddress(sr, principal.XUID, k.countryID(country))
 		// Shape only: which services were asked for and how each user slot and
 		// service answered (HRESULTs and ports are public protocol values).
 		var res []string
@@ -675,7 +685,7 @@ func ServicePort(id uint32) uint16 { return uint16(id + 100) }
 // serviceAddress builds the address block. A requested user slot is granted
 // only for the authenticated principal's own XUID; the prototype granted any
 // non-zero XUID.
-func (k *KDC) serviceAddress(sr *krb.ServiceRequest, xuid uint64) *krb.ServiceAddress {
+func (k *KDC) serviceAddress(sr *krb.ServiceRequest, xuid uint64, countryID byte) *krb.ServiceAddress {
 	a := &krb.ServiceAddress{BWLimit: BandwidthLimit, SiteIP: k.cfg.GatewayIP, NumServices: sr.NumServices}
 	for i := range a.HRUser {
 		switch sr.XUIDs[i] {
@@ -683,7 +693,7 @@ func (k *KDC) serviceAddress(sr *krb.ServiceRequest, xuid uint64) *krb.ServiceAd
 			a.HRUser[i] = krb.HRInvalidService
 		case xuid:
 			a.HRUser[i] = krb.HRSuccess
-			a.UserFlags[i] = uint32(k.cfg.UserCountryID) << 8
+			a.UserFlags[i] = uint32(countryID) << 8
 		default:
 			a.HRUser[i] = krb.HRAccessDenied
 		}
@@ -725,4 +735,16 @@ func (k *KDC) UserAccountBlob(ctx context.Context, xuid string) ([]byte, error) 
 	_, secret := k.cfg.UserKeys.Active()
 	return krb.MachineAccount{XUID: n, Gamertag: p.Gamertag, Domain: strings.TrimPrefix(k.cfg.Domains[0], "@"),
 		Realm: k.cfg.Realm, Key: krb.DeriveUserKey(secret, n)}.Marshal()
+}
+
+// countryID maps the account's profile country to the LocaleCode of the served
+// country list; accounts without a (known) country fall back to UserCountryID.
+func (k *KDC) countryID(country string) byte {
+	if id, ok := krb.LocaleCode(country); ok {
+		return id
+	}
+	if country != "" {
+		log.Printf("xb-auth: country %q has no LocaleCode, using the default %d", country, k.cfg.UserCountryID)
+	}
+	return k.cfg.UserCountryID
 }
