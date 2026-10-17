@@ -192,6 +192,7 @@ func (m *Presences) end(ctx context.Context, account string, ok func(*lease) boo
 	if l.gone || !ok(l) {
 		return nil
 	}
+	log.Printf("presence: ending %s (gen %d)", account, l.gen)
 	if l.session != "" {
 		if err := m.Core.ExpireSession(ctx, l.session); err != nil && !errors.Is(err, core.ErrNotFound) {
 			return ErrUnavailable // keep the entry: the next Tick or Revoke retries
@@ -254,8 +255,12 @@ func (m *Presences) Tick(ctx context.Context) {
 			continue
 		}
 		expired := !m.now().Before(l.deadline)
+		if expired {
+			log.Printf("presence: lease of %s expired by TTL (deadline %s, gen %d)", a, l.deadline.Format("15:04:05"), l.gen)
+		}
 		if !expired {
 			if _, err := m.Core.Heartbeat(ctx, l.session); errors.Is(err, core.ErrNotFound) {
+				log.Printf("presence: core lease of %s lapsed; registering %q again", a, l.title)
 				// Lease lost (core expired it): register the same title again.
 				if id, _, err := m.Core.RegisterSession(ctx, a, l.title, "xbox:"+l.xuid, 0); err == nil {
 					l.session = id
